@@ -771,16 +771,22 @@ function devTpl(d,i){return `
     <div><label>Estado civil</label><input type="text" data-arr="dev" data-i="${i}" data-k="civil" value="${esc(d.civil)}"></div>
     <div><label>Profissão</label><input type="text" data-arr="dev" data-i="${i}" data-k="prof" value="${esc(d.prof)}"></div>
   </div>
-  <div class="row r2">
+  <div class="row r3">
     <div><label>RG</label><input type="text" data-arr="dev" data-i="${i}" data-k="rg" value="${esc(d.rg)}"></div>
-    <div><label>CPF</label><input type="text" data-arr="dev" data-i="${i}" data-k="cpf" value="${esc(d.cpf)}"></div>
+    <div><label>Órgão emissor (RG)</label><input type="text" data-arr="dev" data-i="${i}" data-k="rgEmissor" value="${esc(d.rgEmissor||'')}" placeholder="SSP-SP"></div>
+    <div><label>CPF *</label><input type="text" data-arr="dev" data-i="${i}" data-k="cpf" value="${esc(d.cpf)}"></div>
   </div>
-  <div class="row"><div><label>Endereço</label><input type="text" data-arr="dev" data-i="${i}" data-k="end" value="${esc(d.end)}"></div></div>
-  <div class="row r2">
+  <div class="row r3">
+    <div><label>CEP * <button type="button" class="btn mini" onclick="buscarCEP(${i})">ViaCEP</button></label>
+      <input type="text" data-arr="dev" data-i="${i}" data-k="cep" value="${esc(d.cep||'')}" placeholder="00000-000" maxlength="9"></div>
+    <div><label>Endereço *</label><input type="text" data-arr="dev" data-i="${i}" data-k="end" value="${esc(d.end)}"></div>
     <div><label>Cidade / UF</label><input type="text" data-arr="dev" data-i="${i}" data-k="cid" value="${esc(d.cid)}"></div>
-    <div><label>Telefone / e-mail</label><input type="text" data-arr="dev" data-i="${i}" data-k="contato" value="${esc(d.contato)}"></div>
   </div>
-</div>`;}
+  <div class="row r2">
+    <div><label>Telefone / e-mail</label><input type="text" data-arr="dev" data-i="${i}" data-k="contato" value="${esc(d.contato)}"></div>
+    <div style="display:flex;align-items:flex-end"><small style="color:var(--ink-2)">* obrigatório (art. 784, III, CPC)</small></div>
+  </div>
+</div>`;}  
 function alunoTpl(a,i){return `
 <div class="card">
   <div class="card-head"><strong>Aluno ${i+1}</strong><button type="button" class="btn link" onclick="delAluno(${i})">remover</button></div>
@@ -836,7 +842,7 @@ $('form').addEventListener('change',onEdit);
 
 function addCred(){ credoras.push({nome:'',doc:'',tipo:'pj',end:'',cid:'',uf:'',valor:'',rep:'',cargo:'',repcpf:''}); drawLists(); render(); }
 function delCred(i){ credoras.splice(i,1); drawLists(); render(); }
-function addDev(){ devedores.push({nome:'',nac:'brasileiro(a)',civil:'',prof:'',rg:'',cpf:'',end:'',cid:'',contato:''}); drawLists(); render(); }
+function addDev(){ devedores.push({nome:'',nac:'brasileiro(a)',civil:'',prof:'',rg:'',rgEmissor:'',cpf:'',cep:'',end:'',cid:'',contato:''}); drawLists(); render(); }
 function delDev(i){ devedores.splice(i,1); drawLists(); render(); }
 function addAluno(){ alunos.push({nome:'',serie:'',turno:'',ra:''}); drawLists(); render(); }
 function delAluno(i){ alunos.splice(i,1); drawLists(); render(); }
@@ -1023,10 +1029,17 @@ function qualDevedor(d){
   const bits=[d.nac,d.civil,d.prof].filter(Boolean);
   let s=`<b>${esc((d.nome||'').toUpperCase())}</b>`;
   if(bits.length) s+=', '+esc(bits.join(', '));
-  if(d.rg) s+=`, portador(a) do RG nº ${esc(d.rg)}`;
+  if(d.rg){
+    s+=`, portador(a) do RG nº ${esc(d.rg)}`;
+    if(d.rgEmissor) s+='/'+esc(d.rgEmissor);
+  }
   if(d.cpf) s+=`${d.rg?' e':','} inscrito(a) no CPF sob o nº ${esc(d.cpf)}`;
-  if(d.end) s+=`, residente e domiciliado(a) na ${esc(d.end)}${d.cid?', '+esc(d.cid):''}`;
-  if(d.contato) s+=`, contato ${esc(d.contato)}`;
+  if(d.end){
+    s+=`, residente e domiciliado(a) na ${esc(d.end)}`;
+    if(d.cid) s+=', '+esc(d.cid);
+    if(d.cep) s+=', CEP '+esc(d.cep);
+  }
+  if(d.contato) s+=`, contato: ${esc(d.contato)}`;
   return s+'.';
 }
 function timbreHtml(T){
@@ -1228,19 +1241,26 @@ function validarExportacao(){
       erros.push('Desconto ('+money(descCts/100)+') maior que original + encargos ('+money((origCts+encCts2)/100)+'). Corrija na seção 04.');
   }
 
-  // P1.9 — CPF dos devedores (aviso; obrigatório será tratado em P1.3)
+  // P1.9 + P1.3 — CPF, CEP e qualificação dos devedores
   if(devedores.length>0){
     const cpfs=new Set();
     devedores.forEach((d,i)=>{
-      if(!d.cpf) return;
       const lbl='Devedor '+(i+1)+(d.nome?' ('+d.nome+')':'');
-      if(!validarCPF(d.cpf))
+      // CPF
+      if(!d.cpf){
+        avisos.push(lbl+': CPF ausente — obrigatório para título executivo (art. 784, III, CPC).');
+      }else if(!validarCPF(d.cpf)){
         avisos.push(lbl+': CPF inválido (“'+d.cpf+'”) — verifique antes de exportar.');
-      else{
+      }else{
         const limpo=d.cpf.replace(/\D/g,'');
         if(cpfs.has(limpo)) avisos.push(lbl+': CPF duplicado entre devedores.');
         else cpfs.add(limpo);
       }
+      // Endereço + CEP
+      if(!d.end&&!d.cep)
+        avisos.push(lbl+': Endereço e CEP ausentes — obrigatórios para qualificação completa.');
+      else if(!d.cep)
+        avisos.push(lbl+': CEP ausente — necessário para identificação do endereço.');
     });
   }
   {
@@ -1636,7 +1656,25 @@ function atualizarSignatarios(){
       +'</div></div>';
   }).join('');
 }
-// Verifica configuração do provedor de assinatura no servidor
+// Busca endereço pelo CEP via ViaCEP (P1.3)
+async function buscarCEP(i){
+  const cep=(devedores[i]?.cep||'').replace(/\D/g,'');
+  if(cep.length!==8) return toast('Informe o CEP com 8 dígitos antes de buscar.');
+  toast('Buscando CEP '+cep+'…');
+  try{
+    const r=await fetch('https://viacep.com.br/ws/'+cep+'/json/');
+    const d=await r.json();
+    if(d.erro) return toast('CEP '+cep+' não encontrado. Preencha o endereço manualmente.');
+    if(d.logradouro) devedores[i].end=d.logradouro+(d.bairro?', '+d.bairro:'');
+    devedores[i].cid=d.localidade+(d.uf?' - '+d.uf:'');
+    drawLists(); render();
+    toast('Endereço preenchido: '+d.localidade+'/'+d.uf+'.');
+  }catch(e){
+    toast('Erro ao consultar ViaCEP. Preencha o endereço manualmente.');
+  }
+}
+
+// Busca endereço pelo CEP via ViaCEP (P1.3)
 async function verificarAssinatura(){
   const st=$('ass_status'), btn=$('btnEnviarAssinatura');
   if(!st) return;
