@@ -75,9 +75,6 @@ test.describe('Smoke tests — Gerador de Acordo', () => {
     // Aguardar inicialização do JS (modal de login deve aparecer)
     await expect(page.locator('#loginModal')).toBeVisible({ timeout: 5000 });
 
-    if (erros.length) {
-      console.log('Erros capturados:', erros.join('\n'));
-    }
     expect(erros, 'Erros no console:\n' + erros.join('\n')).toHaveLength(0);
   });
 
