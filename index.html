@@ -74,6 +74,10 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 .idc:hover{background:var(--seal-soft);border-color:var(--seal)}
 .status{font-size:12px;padding:8px 10px;border-radius:var(--radius);background:#f4f6f9;border:1px solid var(--line);margin-bottom:10px}
 .status b{color:var(--seal)}
+.status.ok{background:var(--seal-soft);border-color:var(--seal)}
+.status.erro{background:#fbeeea;border-color:var(--alert);color:#7d3520}
+.status.aviso{background:#fef9ec;border-color:#b8860b;color:#6b4c00}
+.status.expirado{background:#fff3e0;border-color:#e65100;color:#bf4500}
 
 /* ---------- documento ---------- */
 .page{background:#fff;position:relative;width:100%;max-width:794px;min-height:1123px;padding:0;box-shadow:0 2px 20px rgba(18,32,58,.13);font-family:"Times New Roman",Times,Georgia,serif;font-size:11.5pt;line-height:1.5;color:#000;text-align:justify}
@@ -322,24 +326,8 @@ input[type=range]{width:100%;accent-color:var(--seal)}
   <details class="group" ontoggle="if(this.open) atualizarSignatarios()">
     <summary><span class="num">11</span> Assinatura Digital (Adobe Acrobat Sign)</summary>
     <div class="body">
-      <div class="status" id="adobe_status">Não configurado. Informe a Integration Key abaixo.</div>
+      <div class="status" id="adobe_status">Verificando configuração…</div>
       <div class="row">
-        <div><label>Integration Key do Adobe Acrobat Sign</label>
-          <input type="text" id="adobe_key" placeholder="Cole aqui sua Integration Key"></div>
-      </div>
-      <p class="hint">Onde obter: Adobe Acrobat Sign → <b>Conta</b> → <b>Adobe Sign API</b> → <b>Integration Key</b>. Clique em &ldquo;Habilitar acesso à API&rdquo; se necessário.</p>
-      <div class="row r2">
-        <div><label>Região da conta Adobe Sign</label>
-          <select id="adobe_region">
-            <option value="na4">NA4 — Americas (padrão)</option>
-            <option value="na1">NA1 — Americas</option>
-            <option value="na2">NA2 — Americas</option>
-            <option value="eu1">EU1 — Europa</option>
-            <option value="eu2">EU2 — Europa</option>
-            <option value="au1">AU1 — Oceania</option>
-            <option value="jp1">JP1 — Japão</option>
-            <option value="in1">IN1 — Índia</option>
-          </select></div>
         <div><label>Mensagem para os signatários</label>
           <input type="text" id="adobe_msg" value="Por favor, assine o Termo de Confissão de Dívida conforme acordado."></div>
       </div>
@@ -352,7 +340,7 @@ input[type=range]{width:100%;accent-color:var(--seal)}
         </div>
       </div>
       <div class="row r2" style="margin-top:12px">
-        <div><button type="button" class="btn primary small" style="width:100%" onclick="enviarAdobeSign()">✉ Enviar para Assinatura Digital</button></div>
+        <div><button type="button" id="btnEnviarAssinatura" class="btn primary small" disabled style="width:100%" onclick="enviarAdobeSign()">✉ Enviar para Assinatura Digital</button></div>
         <div><button type="button" class="btn small" style="width:100%" onclick="baixarPdf()">⬇ Baixar PDF (assinatura manual)</button></div>
       </div>
       <div id="adobe_result" style="display:none;margin-top:10px"></div>
@@ -1021,42 +1009,85 @@ function abrirNovaAba(html){
 function copiar(t){ try{navigator.clipboard.writeText(t); toast(t+' copiado');}catch(e){} }
 function coletarDados(){
   const dados={campos:{},credoras,devedores,alunos,itens,clausulas};
+  const EXCLUIR=new Set(['g_clientid','adobe_key','adobe_region']); // nunca persistir credenciais
   $('form').querySelectorAll('input[id],select[id],textarea[id]').forEach(el=>{
-    if(el.id==='g_clientid') return;
+    if(EXCLUIR.has(el.id)) return;
     dados.campos[el.id]= el.type==='checkbox'?el.checked:el.value; });
   return dados;
 }
 function aplicarDados(d){
   credoras=d.credoras||[]; devedores=d.devedores||[]; alunos=d.alunos||[]; itens=d.itens||[];
   if(d.clausulas&&d.clausulas.length) clausulas=d.clausulas.map((c,i)=>({id:c.id||('clausula-'+(i+1)),on:c.on!==false,titulo:c.titulo||'',texto:c.texto||''}));
-  Object.entries(d.campos||{}).forEach(([k,v])=>{ const el=$(k); if(!el) return; if(el.type==='checkbox') el.checked=!!v; else el.value=v; });
+  const EXCLUIR=new Set(['g_clientid','adobe_key','adobe_region']); // nunca reinjetar credenciais de JSON antigo
+  Object.entries(d.campos||{}).forEach(([k,v])=>{ if(EXCLUIR.has(k)) return; const el=$(k); if(!el) return; if(el.type==='checkbox') el.checked=!!v; else el.value=v; });
   drawLists(); render();
 }
 
 /* ---------- Google Drive ---------- */
-let gToken=null, gFolder=null, gArquivoId=null;
+let gToken=null, gFolder=null, gArquivoId=null, gTokenExpiry=null;
 const PASTA='Acordos - Gerador';
 function ls(k,v){ try{ if(v===undefined) return localStorage.getItem('ger_'+k); localStorage.setItem('ger_'+k,v); }catch(e){ return null; } }
-function statusDrive(txt){ $('g_status').innerHTML=txt; }
+function statusDrive(txt,estado=''){
+  const el=$('g_status'); if(!el) return;
+  el.innerHTML=txt;
+  el.className='status'+(estado?' '+estado:'');
+}
 function conectarDrive(){
   const cid=val('g_clientid');
   if(!cid) return toast('Informe o Client ID do Google.');
-  if(!(window.google&&google.accounts&&google.accounts.oauth2)) return toast('Biblioteca do Google não carregou. Publique o site e tente de novo.');
+  if(!(window.google&&google.accounts&&google.accounts.oauth2)){
+    statusDrive('Biblioteca do Google não carregou. O app precisa estar publicado em HTTPS para usar autenticação Google.','erro');
+    return;
+  }
   ls('cid',cid);
+  statusDrive('Aguardando autorização…','aviso');
   google.accounts.oauth2.initTokenClient({
     client_id:cid,
     scope:'https://www.googleapis.com/auth/drive.file',
-    callback:r=>{ if(r.error){ statusDrive('Falha na autorização.'); return toast('Autorização negada.'); }
-      gToken=r.access_token; statusDrive('Conectado ao Google Drive. Pasta: <b>'+PASTA+'</b>'); listarDrive(); }
+    error_callback:e=>{
+      if(e.type==='popup_failed_to_open'||e.type==='popup_closed'){
+        statusDrive('Janela de autorização bloqueada ou fechada. Permita pop-ups deste site e tente novamente.','erro');
+      }else{
+        statusDrive('Erro de autenticação: '+(e.type||'desconhecido'),'erro');
+      }
+    },
+    callback:r=>{
+      if(r.error){
+        statusDrive('Falha na autorização: '+(r.error_description||r.error),'erro');
+        return toast('Autorização negada.');
+      }
+      gToken=r.access_token;
+      gTokenExpiry=Date.now()+((r.expires_in||3600)*1000-60000);
+      statusDrive('Conectado ao Google Drive — pasta <b>'+PASTA+'</b>','ok');
+      listarDrive();
+    }
   }).requestAccessToken();
 }
-function desconectarDrive(){ gToken=null; gFolder=null; gArquivoId=null; statusDrive('Não conectado.'); toast('Desconectado.'); }
+function desconectarDrive(){
+  gToken=null; gFolder=null; gArquivoId=null; gTokenExpiry=null;
+  statusDrive('Não conectado.','');
+  toast('Desconectado.');
+}
 async function gApi(url,opts){
-  if(!gToken) throw new Error('sem token');
+  if(!gToken){
+    statusDrive('Não conectado ao Google Drive.','');
+    throw new Error('Conecte o Google Drive primeiro.');
+  }
+  if(gTokenExpiry&&Date.now()>gTokenExpiry){
+    gToken=null; gTokenExpiry=null;
+    statusDrive('Sessão expirada. Clique em Conectar para renovar.','expirado');
+    throw new Error('Sessão expirada. Clique em Conectar para renovar.');
+  }
   opts=opts||{}; opts.headers=Object.assign({Authorization:'Bearer '+gToken},opts.headers||{});
   const r=await fetch(url,opts);
-  if(r.status===401){ gToken=null; statusDrive('Sessão expirada — conecte novamente.'); throw new Error('401'); }
-  if(!r.ok) throw new Error('HTTP '+r.status);
+  if(r.status===401){
+    gToken=null; gTokenExpiry=null;
+    statusDrive('Sessão expirada. Clique em Conectar para renovar.','expirado');
+    throw new Error('Sessão expirada. Clique em Conectar para renovar.');
+  }
+  if(r.status===403) throw new Error('Permissão negada pelo Google Drive (HTTP 403).');
+  if(r.status===404) throw new Error('Arquivo ou pasta não encontrado no Drive (HTTP 404).');
+  if(!r.ok) throw new Error('Erro HTTP '+r.status+' ao acessar o Google Drive.');
   return r;
 }
 async function pastaDrive(){
@@ -1199,10 +1230,43 @@ function atualizarSignatarios(){
 </div>`).join('');
 }
 async function enviarAdobeSign(){
-  const key=val('adobe_key');
-  if(!key) return toast('Informe a Integration Key do Adobe Acrobat Sign.');
   const{ok}=podeExportar(); if(!ok) return;
   const signers=[];
+  devedores.forEach((_,i)=>{
+    const nome=($('asn_nome'+i)||{}).value||'';
+    const email=($('asn_email'+i)||{}).value||'';
+    if(email.includes('@')) signers.push({name:nome||email,email,order:i+1});
+  });
+  if(!signers.length) return toast('Informe ao menos um e-mail de signatário na seção 11.');
+  $('adobe_status').innerHTML='Enviando documento para o Adobe Acrobat Sign…';
+  $('adobe_status').className='status aviso';
+  $('adobe_result').style.display='none';
+  try{
+    const upResp=await fetch('/api/adobe-sign',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'upload',
+        filename:nomeArquivo('html'),content:wordHtml(),mimeType:'text/html'})});
+    const upData=await upResp.json();
+    if(!upResp.ok) throw new Error(upData.error||upData.code||upData.message||'Falha no upload ('+upResp.status+')');
+    const agResp=await fetch('/api/adobe-sign',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'createAgreement',
+        transientDocumentId:upData.transientDocumentId,
+        name:val('f_titulo')||'Termo de Confissão de Dívida',
+        message:val('adobe_msg'),signers})});
+    const agData=await agResp.json();
+    if(!agResp.ok) throw new Error(agData.error||agData.code||agData.message||'Falha ao criar acordo ('+agResp.status+')');
+    $('adobe_status').innerHTML='<b style="color:var(--seal)">✓ Enviado!</b> ID: <code>'+agData.id+'</code>';
+    $('adobe_status').className='status ok';
+    $('adobe_result').style.display='';
+    $('adobe_result').innerHTML='<div class="calc">Acordo criado no Adobe Acrobat Sign.<br><b>ID:</b> <code>'+agData.id+'</code><br>Os signatários receberão um e-mail com o link para assinar eletronicamente.</div>';
+    toast('Enviado para assinatura digital!');
+  }catch(e){
+    $('adobe_status').innerHTML='<span style="color:var(--alert)">Erro: '+esc(e.message)+'</span>';
+    $('adobe_status').className='status erro';
+    toast('Erro Adobe Sign: '+e.message);
+  }
+}
   devedores.forEach((_,i)=>{
     const nome=($('asn_nome'+i)||{}).value||'';
     const email=($('asn_email'+i)||{}).value||'';
@@ -1236,10 +1300,42 @@ async function enviarAdobeSign(){
   }
 }
 
+// Verifica se Adobe Acrobat Sign está configurado no servidor
+async function verificarAdobeSign(){
+  const st=$('adobe_status'), btn=$('btnEnviarAssinatura');
+  if(!st) return;
+  try{
+    const r=await fetch('/api/adobe-sign',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'status'})});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(d.configured){
+      st.innerHTML='✓ Adobe Acrobat Sign configurado. Preencha os e-mails e envie para assinatura.';
+      st.className='status ok';
+      if(btn) btn.disabled=false;
+    }else{
+      st.innerHTML='Assinatura digital não configurada neste ambiente. '
+        +'Configure <code>ADOBE_SIGN_INTEGRATION_KEY</code> e '
+        +'<code>ADOBE_SIGN_REGION</code> no painel do Vercel.';
+      st.className='status aviso';
+      if(btn) btn.disabled=true;
+    }
+  }catch(e){
+    st.innerHTML='API de assinatura não encontrada. Use <code>vercel dev</code> com '
+      +'<code>.env.local</code> para testar localmente.';
+    st.className='status';
+    if(btn) btn.disabled=true;
+  }
+}
+
 $('f_data').value=new Date().toISOString().slice(0,10);
+// Limpar chaves sensíveis que versões anteriores guardavam no navegador
+try{['ger_adobe_key','ger_region'].forEach(k=>localStorage.removeItem(k));}catch(e){}
 const cidSalvo=ls('cid'); if(cidSalvo) $('g_clientid').value=cidSalvo;
 loadExample();
 atualizarSignatarios();
+verificarAdobeSign();
 </script>
 </body>
 </html>
