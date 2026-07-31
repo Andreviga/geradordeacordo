@@ -510,6 +510,40 @@ function eFeriado(data,ferManuais){
   return false;
 }
 
+/* ================= validação de documentos (P1.6) ================= */
+// Valida CNPJ (14 dígitos) com dígitos verificadores
+// Pesos do 1º DV: 5,4,3,2,9,8,7,6,5,4,3,2 | do 2º DV: 6,5,4,3,2,9,8,7,6,5,4,3,2
+function validarCNPJ(cnpj){
+  const n=cnpj.replace(/\D/g,'');
+  if(n.length!==14||/^(\d)\1{13}$/.test(n)) return false;
+  let s=0,w=5;
+  for(let i=0;i<12;i++){s+=parseInt(n[i])*w; w--; if(w<2)w=9;}
+  let dv=s%11<2?0:11-(s%11); if(dv!==parseInt(n[12])) return false;
+  s=0; w=6;
+  for(let i=0;i<13;i++){s+=parseInt(n[i])*w; w--; if(w<2)w=9;}
+  dv=s%11<2?0:11-(s%11); return dv===parseInt(n[13]);
+}
+// Valida CPF (11 dígitos) com dígitos verificadores
+function validarCPF(cpf){
+  const n=cpf.replace(/\D/g,'');
+  if(n.length!==11||/^(\d)\1{10}$/.test(n)) return false;
+  let s=0;
+  for(let i=0;i<9;i++) s+=parseInt(n[i])*(10-i);
+  let r=(s*10)%11; if(r===10||r===11) r=0;
+  if(r!==parseInt(n[9])) return false;
+  s=0;
+  for(let i=0;i<10;i++) s+=parseInt(n[i])*(11-i);
+  r=(s*10)%11; if(r===10||r===11) r=0;
+  return r===parseInt(n[10]);
+}
+// Valida CNPJ (pj) ou CPF (pf) conforme o tipo
+function validarDocumento(doc,tipo){
+  const n=doc.replace(/\D/g,'');
+  if(tipo==='pj'||n.length===14) return validarCNPJ(doc);
+  if(tipo==='pf'||n.length===11) return validarCPF(doc);
+  return false;
+}
+
 /* ================= centavos (aritmética exata) ================= */
 // ─── Autenticação JWT ──────────────────────────────────────────────
 // Sessão de 8h em sessionStorage. Sem "lembrar-me" — exige novo login
@@ -892,9 +926,20 @@ function demonstrativoHtml(){
     + `<tr><td class="n" colspan="3"><b>Total</b></td><td class="v"><b>${money(totCts/100)}</b></td></tr></tbody></table>`;
 }
 function divisaoHtml(){
-  const cv=credoras.filter(c=>parseFloat(c.valor)>0);
-  if(!cv.length) return '';
-  return cv.map(c=>`<p class="bul">• <b>${esc(c.nome)}</b> (CNPJ/CPF nº ${esc(c.doc)}) — <b>${money(parseFloat(c.valor))}</b> (${extValor(parseFloat(c.valor))});</p>`).join('');
+  // Degradar para frase natural com uma única credora (sem tabela)
+  const cv=credoras.filter(c=>strToCents(c.valor)>0);
+  if(cv.length<2) return '';
+  const totalCts=cv.reduce((s,c)=>s+strToCents(c.valor),0);
+  if(totalCts===0) return '';
+  const p=_planoAtual;
+  return cv.map(c=>{
+    const cts=strToCents(c.valor);
+    const pct=(cts/totalCts*100).toFixed(2).replace('.',',')+'%';
+    // Parcela proporcional (baseada na parcela padrão, centavos)
+    const parcelaCts=p&&p.parcelaCts?Math.round(p.parcelaCts*cts/totalCts):null;
+    const parcelaStr=parcelaCts!==null?' · parcela aprox. '+money(parcelaCts/100):'';
+    return `<p class="bul">• <b>${esc(c.nome)}</b> (CNPJ/CPF nº ${esc(c.doc)}) — <b>${money(cts/100)}</b> (${extValor(cts/100)}) = ${pct}${parcelaStr};</p>`;
+  }).join('');
 }
 
 /* ================= tokens ================= */
@@ -1148,6 +1193,23 @@ function validarExportacao(){
       else if(dAssin&&!dEntr&&dAssin>dParc)
         avisos.push('Data de assinatura ('+fmtDate(dAssin)+') é posterior à 1ª parcela ('+fmtDate(dParc)+'). Verifique.');
     }
+  }
+
+  // P1.6 — Validação de CNPJ/CPF e unicidade entre credoras
+  if(credoras.length>0){
+    const docs=new Set();
+    credoras.forEach((c,i)=>{
+      const lbl='Credora '+(i+1)+(c.nome?' ('+c.nome+')':'');
+      if(c.doc){
+        if(!validarDocumento(c.doc,c.tipo))
+          erros.push(lbl+': CNPJ/CPF inválido (“'+c.doc+'”) — verifique o dígito verificador.');
+        else{
+          const limpo=c.doc.replace(/\D/g,'');
+          if(docs.has(limpo)) erros.push(lbl+': CNPJ/CPF duplicado entre credoras.');
+          else docs.add(limpo);
+        }
+      }
+    });
   }
 
   // Tokens: validar sobre o HTML final exportado.
