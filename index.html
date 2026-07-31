@@ -523,6 +523,25 @@ const PADRAO = ['reconhecimento','pagamento','mora','penal','solidariedade','mat
 let credoras=[], devedores=[], alunos=[], itens=[], clausulas=[];
 let _planoAtual=null; // cache do último plano calculado — atualizado em render()
 
+// Allowlist de campos de formulário que são persistidos em JSON.
+// Novos campos devem ser adicionados AQUI, nunca a uma blocklist.
+const CAMPOS_FORMULARIO=new Set([
+  // Seção 04 — Dívida
+  'd_origem','d_periodo','d_original','d_encargos','d_desconto','d_total','op_demonstrativo',
+  // Seção 05 — Pagamento
+  'p_entrada','p_entradadata','p_modo','p_qtd','p_valor','p_data1','p_meio','p_dados','op_diautil',
+  // Seção 06 — Percentuais
+  'e_multamora','e_juros','e_multapenal','e_honorarios','e_indice','e_tolerancia',
+  // Seção 08 — Papel timbrado
+  'op_timbre','op_marca','op_marcaop','t_linha1','t_texto','t_rodape',
+  // Seção 09 — Fechamento
+  'f_foro','f_vias','f_local','f_data','op_datavazia','t1_nome','t1_cpf','t2_nome','t2_cpf','f_titulo',
+  // Seção 10 — Google Drive
+  'g_clientid',
+  // Seção 11 — Assinatura
+  'adobe_msg'
+]);
+
 /* ---------- listas dinâmicas ---------- */
 function credTpl(c,i){return `
 <div class="card">
@@ -1009,17 +1028,22 @@ function abrirNovaAba(html){
 function copiar(t){ try{navigator.clipboard.writeText(t); toast(t+' copiado');}catch(e){} }
 function coletarDados(){
   const dados={campos:{},credoras,devedores,alunos,itens,clausulas};
-  const EXCLUIR=new Set(['g_clientid','adobe_key','adobe_region']); // nunca persistir credenciais
-  $('form').querySelectorAll('input[id],select[id],textarea[id]').forEach(el=>{
-    if(EXCLUIR.has(el.id)) return;
-    dados.campos[el.id]= el.type==='checkbox'?el.checked:el.value; });
+  // Usar allowlist: só campos conhecidos são persistidos (nunca credenciais)
+  CAMPOS_FORMULARIO.forEach(id=>{
+    const el=$(id); if(!el) return;
+    dados.campos[id]=el.type==='checkbox'?el.checked:el.value;
+  });
   return dados;
 }
 function aplicarDados(d){
   credoras=d.credoras||[]; devedores=d.devedores||[]; alunos=d.alunos||[]; itens=d.itens||[];
   if(d.clausulas&&d.clausulas.length) clausulas=d.clausulas.map((c,i)=>({id:c.id||('clausula-'+(i+1)),on:c.on!==false,titulo:c.titulo||'',texto:c.texto||''}));
-  const EXCLUIR=new Set(['g_clientid','adobe_key','adobe_region']); // nunca reinjetar credenciais de JSON antigo
-  Object.entries(d.campos||{}).forEach(([k,v])=>{ if(EXCLUIR.has(k)) return; const el=$(k); if(!el) return; if(el.type==='checkbox') el.checked=!!v; else el.value=v; });
+  // Allowlist: só campos conhecidos são restaurados; chaves estranhas (ex: credenciais de versão antiga) são ignoradas
+  Object.entries(d.campos||{}).forEach(([k,v])=>{
+    if(!CAMPOS_FORMULARIO.has(k)) return;
+    const el=$(k); if(!el) return;
+    if(el.type==='checkbox') el.checked=!!v; else el.value=v;
+  });
   drawLists(); render();
 }
 
