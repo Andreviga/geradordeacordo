@@ -413,6 +413,51 @@ function addMonths(d,m){ const dt=new Date(d.getFullYear(),d.getMonth(),1),day=d
   const last=new Date(dt.getFullYear(),dt.getMonth()+1,0).getDate(); dt.setDate(Math.min(day,last)); return dt; }
 function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('on'),2800); }
 
+/* ================= centavos (aritmética exata) ================= */
+// Converte string de valor (vinda de input ou armazenada) para centavos inteiros,
+// sem passar por aritmética de ponto flutuante.
+function strToCents(raw){
+  raw=String(raw||'').trim(); if(!raw) return 0;
+  const dot=raw.indexOf('.');
+  if(dot===-1) return (parseInt(raw,10)||0)*100;
+  const int=parseInt(raw.slice(0,dot),10)||0;
+  const cts=parseInt((raw.slice(dot+1)+'00').slice(0,2),10)||0;
+  return int*100+cts;
+}
+// Lê um <input> pelo id e retorna centavos inteiros.
+function inputCents(id){ const el=$(id); return el?strToCents(el.value):0; }
+
+// Cálculo puro do plano de parcelamento — sem acesso ao DOM, testável com Node.js.
+// Todos os valores de entrada e saída em centavos inteiros.
+function calcPlano(totalCts,entradaCts,modo,qtd,valorParcelaCts){
+  const baseCts=Math.max(0,totalCts-entradaCts);
+  let n,parcelaCts,ultimaCts,erro=null;
+  if(modo==='qtd'){
+    n=Math.max(1,qtd);
+    if(baseCts===0){ parcelaCts=0; ultimaCts=0; }
+    else{ parcelaCts=Math.floor(baseCts/n); ultimaCts=baseCts-parcelaCts*(n-1); }
+  }else{
+    if(valorParcelaCts<=0){
+      erro='Valor da parcela deve ser maior que zero.';
+      n=1; parcelaCts=baseCts; ultimaCts=baseCts;
+    }else if(valorParcelaCts>=baseCts){
+      // Parcela cobre ou excede a base: uma única parcela com o valor da base
+      n=1; parcelaCts=baseCts; ultimaCts=baseCts;
+    }else{
+      n=Math.ceil(baseCts/valorParcelaCts);
+      parcelaCts=valorParcelaCts;
+      ultimaCts=baseCts-parcelaCts*(n-1);
+      // Resíduo minúsculo (< 10 % da parcela): absorver na última parcela cheia
+      if(n>1&&ultimaCts>0&&ultimaCts<Math.ceil(parcelaCts/10)){
+        n-=1; ultimaCts=baseCts-parcelaCts*(n-1);
+      }
+    }
+  }
+  const somaTotal=entradaCts+parcelaCts*(n-1)+ultimaCts;
+  return{totalCts,entradaCts,baseCts,n,parcelaCts,ultimaCts,
+    iguais:(ultimaCts===parcelaCts),aritmOk:(somaTotal===totalCts),erro};
+}
+
 /* ================= biblioteca de cláusulas ================= */
 const CATALOGO = [
 {id:'reconhecimento', titulo:'DO RECONHECIMENTO DA DÍVIDA', texto:
@@ -487,6 +532,7 @@ const PADRAO = ['reconhecimento','pagamento','mora','penal','solidariedade','mat
 
 /* ================= estado ================= */
 let credoras=[], devedores=[], alunos=[], itens=[], clausulas=[];
+let _planoAtual=null; // cache do último plano calculado — atualizado em render()
 
 /* ---------- listas dinâmicas ---------- */
 function credTpl(c,i){return `
@@ -591,8 +637,13 @@ function addAluno(){ alunos.push({nome:'',serie:'',turno:'',ra:''}); drawLists()
 function delAluno(i){ alunos.splice(i,1); drawLists(); render(); }
 function addItem(){ itens.push({desc:'',venc:'',valor:''}); drawLists(); render(); }
 function delItem(i){ itens.splice(i,1); drawLists(); render(); }
-function somarItens(){ const t=itens.reduce((s,i)=>s+(parseFloat(i.valor)||0),0);
-  $('d_original').value=t.toFixed(2); $('d_total').value=(t+num('d_encargos')-num('d_desconto')).toFixed(2); render(); toast('Total atualizado a partir dos itens.'); }
+function somarItens(){
+  const totalCts=itens.reduce((s,i)=>s+strToCents(i.valor),0);
+  const encCts=inputCents('d_encargos'), descCts=inputCents('d_desconto');
+  $('d_original').value=(totalCts/100).toFixed(2);
+  $('d_total').value=((totalCts+encCts-descCts)/100).toFixed(2);
+  render(); toast('Total atualizado a partir dos itens.');
+}
 
 function novoId(base){ let id=base||'clausula', n=2; while(clausulas.some(c=>c.id===id)) id=(base||'clausula')+'-'+(n++); return id; }
 function addClausula(){ clausulas.push({id:novoId('clausula'),on:true,titulo:'NOVA CLÁUSULA',texto:''}); drawLists(); render(); }
@@ -610,22 +661,19 @@ function resetClausulas(){
 }
 
 /* ================= parcelamento ================= */
+// Wrapper DOM: lê inputs e delega ao calcPlano() puro; adiciona floats para renderização.
 function plano(){
-  const total=num('d_total'), entrada=num('p_entrada');
-  const base=Math.max(0,Math.round((total-entrada)*100)/100);
-  let n,parcela,ultima;
-  if(val('p_modo')==='qtd'){
-    n=Math.max(1,Math.floor(num('p_qtd'))||1);
-    parcela=Math.floor(base/n*100)/100;
-    ultima=Math.round((base-parcela*(n-1))*100)/100;
-  }else{
-    parcela=num('p_valor');
-    if(parcela<=0){ parcela=base; n=1; ultima=base; }
-    else{ n=Math.max(1,Math.ceil(Math.round(base*100)/100/parcela));
-      ultima=Math.round((base-parcela*(n-1))*100)/100;
-      if(ultima<=0){ n=Math.max(1,n-1); ultima=parcela; } }
-  }
-  return {total,entrada,base,n,parcela,ultima,iguais:Math.abs(ultima-parcela)<0.005};
+  const res=calcPlano(
+    inputCents('d_total'), inputCents('p_entrada'),
+    val('p_modo'),
+    Math.max(1,parseInt(($('p_qtd')||{}).value||'1',10)||1),
+    inputCents('p_valor')
+  );
+  return Object.assign(res,{
+    total:  res.totalCts/100,   entrada:res.entradaCts/100,
+    base:   res.baseCts/100,    parcela:res.parcelaCts/100,
+    ultima: res.ultimaCts/100
+  });
 }
 function vencimentos(p){
   const d1=parseDate(val('p_data1')); if(!d1) return [];
@@ -640,13 +688,13 @@ function vencimentos(p){
 
 /* ================= blocos ================= */
 function listaParcelasHtml(){
-  const p=plano();
+  const p=_planoAtual||plano();
   if(p.iguais) return `<p>${bold(`**${p.n} (${extF(p.n)}) parcelas** de **${money(p.parcela)}** (${extValor(p.parcela)}) cada uma.`)}</p>`;
   return `<p class="bul">${bold(`• **${p.n-1} (${extF(p.n-1)}) parcelas** no valor de **${money(p.parcela)}** (${extValor(p.parcela)}) cada uma;`)}</p>`
        + `<p class="bul">${bold(`• **01 (uma) parcela final** no valor de **${money(p.ultima)}** (${extValor(p.ultima)}).`)}</p>`;
 }
 function tabelaParcelasHtml(){
-  const p=plano(), v=vencimentos(p); if(!v.length) return '';
+  const p=_planoAtual||plano(), v=vencimentos(p); if(!v.length) return '';
   const metade=Math.ceil(v.length/2);
   let linhas='';
   for(let i=0;i<metade;i++){
@@ -671,7 +719,7 @@ function divisaoHtml(){
 
 /* ================= tokens ================= */
 function tokens(){
-  const p=plano(), v=vencimentos(p), multi=credoras.length>1, md=devedores.length>1;
+  const p=_planoAtual||plano(), v=vencimentos(p), multi=credoras.length>1, md=devedores.length>1;
   const ult=v.length?v[v.length-1].data:null;
   const d1=parseDate(val('p_data1'));
   return {
@@ -796,25 +844,40 @@ function render(){
   $('wrapValor').style.display = val('p_modo')==='qtd'?'none':'';
   $('itensBox').style.display  = chk('op_demonstrativo')?'':'none';
 
-  const somaCred=credoras.reduce((s,c)=>s+(parseFloat(c.valor)||0),0), cc=$('calcCredoras');
-  if(credoras.length>1&&somaCred>0){
-    const bate=Math.abs(somaCred-num('d_total'))<0.02;
+  // ── credoras ──
+  const totalCts=inputCents('d_total');
+  const somaCredCts=credoras.reduce((s,c)=>s+strToCents(c.valor),0), cc=$('calcCredoras');
+  if(credoras.length>1&&somaCredCts>0){
+    const bate=somaCredCts===totalCts;
     cc.style.display=''; cc.className='calc'+(bate?'':' warn');
-    cc.innerHTML=credoras.map(c=>`${esc(c.nome||'(sem nome)')}: <b>${money(parseFloat(c.valor)||0)}</b>`).join('<br>')
-      +`<br>Soma: <b>${money(somaCred)}</b> ${bate?'✓ confere com o total':'— difere do total confessado'}`;
+    cc.innerHTML=credoras.map(c=>`${esc(c.nome||'(sem nome)')}: <b>${money(strToCents(c.valor)/100)}</b>`).join('<br>')
+      +`<br>Soma: <b>${money(somaCredCts/100)}</b> ${bate?'✓ confere com o total':'— difere do total confessado'}`;
   } else cc.style.display='none';
 
-  const total=num('d_total'), comp=num('d_original')+num('d_encargos')-num('d_desconto');
-  let dv=`Total confessado: <b>${money(total)}</b><br><span style="font-size:11.5px">${extValor(total)}</span>`;
-  if(comp>0&&Math.abs(comp-total)>0.009) dv+=`<br><span style="font-size:11.5px">Original + encargos − desconto = ${money(comp)} (difere do total)</span>`;
+  // ── dívida ──
+  const compCts=inputCents('d_original')+inputCents('d_encargos')-inputCents('d_desconto');
+  let dv=`Total confessado: <b>${money(totalCts/100)}</b><br><span style="font-size:11.5px">${extValor(totalCts/100)}</span>`;
+  if(compCts>0&&compCts!==totalCts) dv+=`<br><span style="font-size:11.5px">Original + encargos − desconto = ${money(compCts/100)} (difere do total)</span>`;
   $('calcDivida').innerHTML=dv;
 
-  const p=plano(), soma=Math.round((p.parcela*(p.n-1)+p.ultima+p.entrada)*100)/100, ok=Math.abs(soma-p.total)<0.02, v=vencimentos(p);
-  const cx=$('calcParcelas'); cx.className='calc'+(ok?'':' warn');
-  cx.innerHTML=(p.iguais?`<b>${p.n}×</b> ${money(p.parcela)}`:`<b>${p.n-1}×</b> ${money(p.parcela)} + <b>1×</b> ${money(p.ultima)}`)
-    +(p.entrada>0?` &nbsp;•&nbsp; entrada ${money(p.entrada)}`:'')
-    +`<br>Soma: <b>${money(soma)}</b> ${ok?'✓ confere com o total':'— não fecha com o total confessado'}`
-    +(v.length?`<br>Último vencimento: <b>${fmtDate(v[v.length-1].data)}</b>`:'');
+  // ── parcelas — fonte única de verdade ──
+  _planoAtual=plano();
+  const p=_planoAtual, v=vencimentos(p);
+  const cx=$('calcParcelas');
+  cx.className='calc'+(p.aritmOk&&!p.erro?'':' warn');
+  if(p.erro){
+    cx.innerHTML=`<span style="color:var(--alert)">${esc(p.erro)}</span>`;
+  }else{
+    const resLinha=p.iguais
+      ?`<b>${p.n}×</b> ${money(p.parcela)}`
+      :`<b>${p.n-1}×</b> ${money(p.parcela)} + <b>1×</b> ${money(p.ultima)}`;
+    const entLinha=p.entrada>0?` + entrada ${money(p.entrada)}`:'';
+    const status=p.aritmOk
+      ?'✓ confere com o total confessado'
+      :'✗ divergência detectada — verifique os valores';
+    const ultVenc=v.length?`<br>Último vencimento: <b>${fmtDate(v[v.length-1].data)}</b>`:'';
+    cx.innerHTML=`${resLinha}${entLinha}<br>Soma: <b>${money(p.total)}</b> — ${status}${ultVenc}`;
+  }
 
   $('doc').innerHTML=buildDoc();
 }
