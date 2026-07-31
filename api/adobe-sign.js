@@ -69,9 +69,27 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Método não permitido.' });
 
-  // Camada 1: Verificar token de acesso compartilhado (APP_ACCESS_TOKEN)
-  // X-App-Token é envidado pelo cliente e deve coincidir com a env var do servidor.
-  // Quando APP_ACCESS_TOKEN não está configurado (dev local), o check é pulado.
+  // Rate limiting por IP — cobre action=status também (prevenção de sondagem)
+  const ip = ((req.headers['x-forwarded-for'] || '') || req.socket?.remoteAddress || 'unknown')
+    .split(',')[0].trim();
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Muitas requisições. Aguarde um minuto e tente novamente.' });
+  }
+
+  const { action, ...params } = req.body || {};
+  if (!action) return res.status(400).json({ error: 'Parâmetro "action" obrigatório.' });
+
+  // ── action: status — isento de auth, coberto por rate limit ────────────
+  // Retorna apenas { configured: true|false }. Nenhuma credencial exposta.
+  // A UI precisa chamar isto na carga da página sem ter nenhum token configurado.
+  if (action === 'status') {
+    return res.status(200).json({
+      configured: !!(process.env.ADOBE_SIGN_INTEGRATION_KEY),
+    });
+  }
+
+  // Camada 1: Verificar token de acesso compartilhado (APP_ACCESS_TOKEN).
+  // Quando APP_ACCESS_TOKEN não está configurado no servidor, o check é pulado (dev local).
   const APP_TOKEN_REQUIRED = process.env.APP_ACCESS_TOKEN;
   if (APP_TOKEN_REQUIRED) {
     const provided = req.headers['x-app-token'] || '';
@@ -84,25 +102,6 @@ module.exports = async function handler(req, res) {
   // clientes não-browser, por isso é camada adicional, não única.
   if (!checkOrigin(req)) {
     return res.status(403).json({ error: 'Origem não autorizada.' });
-  }
-
-  // Rate limiting por IP
-  const ip = ((req.headers['x-forwarded-for'] || '') || req.socket?.remoteAddress || 'unknown')
-    .split(',')[0].trim();
-  if (!checkRateLimit(ip)) {
-    return res.status(429).json({ error: 'Muitas requisições. Aguarde um minuto e tente novamente.' });
-  }
-
-  const { action, ...params } = req.body || {};
-  if (!action) return res.status(400).json({ error: 'Parâmetro "action" obrigatório.' });
-
-  // ── action: status ─ retorna configuração sem expor credenciais ───────────
-  // Não requer APP_ACCESS_TOKEN para que a UI possa verificar disponibilidade
-  // sem ter o token configurado no cliente.
-  if (action === 'status') {
-    return res.status(200).json({
-      configured: !!(process.env.ADOBE_SIGN_INTEGRATION_KEY),
-    });
   }
 
   // Credenciais do servidor
