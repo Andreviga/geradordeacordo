@@ -1,5 +1,17 @@
 {
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  },
+  "scripts": {
+    "test:unit": "node tests/plano.test.js && node tests/validar-tokens.test.js && node tests/subst.test.js && node tests/rotas-exportacao.test.js && node tests/campos-formulario.test.js",
+    "test:e2e": "playwright test",
+    "test": "npm run test:unit",
+    "hash": "node scripts/gerar-hash.js"
   }
 }
