@@ -48,11 +48,15 @@ function traduzirErro(data) {
     USER_NOT_ACTIVE:           'Conta Adobe Sign inativa.',
     AGREEMENT_NOT_MODIFIABLE:  'O acordo não pode ser modificado no estado atual.',
     INVALID_PARTICIPANT:       'E-mail de signatário inválido ou não aceito pelo Adobe Sign.',
+    DUPLICATE_PARTICIPANT:     'E-mail duplicado na lista de signatários.',
     MISSING_REQUIRED_PARAM:    'Parâmetro obrigatório ausente na requisição.',
     NO_FILE_CONTENT:           'Arquivo enviado está vazio.',
+    REQUEST_LIMIT_EXCEEDED:    'Limite de requisições da API Adobe Sign atingido. Aguarde e tente novamente.',
+    PLAN_LIMIT_EXCEEDED:       'Cota mensal do plano Adobe Sign esgotada. Aguarde o próximo ciclo ou faça upgrade do plano.',
   };
   const code = data.code || '';
-  const msg  = MSGS[code] || data.message || data.error || 'Erro desconhecido na API Adobe Sign.';
+  const msg  = MSGS[code]
+    || (code ? `[${code}] ${(data.message || data.error || '').trim()}` : data.message || data.error || 'Erro desconhecido na API Adobe Sign.');
   return { error: msg, code };
 }
 
