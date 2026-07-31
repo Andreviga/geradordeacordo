@@ -594,14 +594,19 @@ function verificarAutenticacao(){
   $('loginModal').style.display='none';
   return true;
 }
-// Converte string de valor (vinda de input ou armazenada) para centavos inteiros,
-// sem passar por aritmética de ponto flutuante.
+// Converte string de valor para centavos inteiros.
+// Aceita: 1234.56 (EN) | 1.234,56 ou 1234,56 (BR) | R$ 1.234,56 — rejeita negativos.
 function strToCents(raw){
-  raw=String(raw||'').trim(); if(!raw) return 0;
-  const dot=raw.indexOf('.');
-  if(dot===-1) return (parseInt(raw,10)||0)*100;
-  const int=parseInt(raw.slice(0,dot),10)||0;
-  const cts=parseInt((raw.slice(dot+1)+'00').slice(0,2),10)||0;
+  if(!raw&&raw!==0) return 0;
+  let s=String(raw).trim().replace(/R\$\s*/gi,'').trim();
+  if(!s||s==='-') return 0;
+  if(s.startsWith('-')) return 0;   // rejeitar negativo
+  // Formato BR: vírgula como decimal (com pontos como milhar)
+  if(s.includes(',')){ s=s.replace(/\./g,'').replace(',','.'); }
+  const dot=s.indexOf('.');
+  if(dot===-1) return (parseInt(s,10)||0)*100;
+  const int=parseInt(s.slice(0,dot),10)||0;
+  const cts=parseInt((s.slice(dot+1)+'00').slice(0,2),10)||0;
   return int*100+cts;
 }
 // Lê um <input> pelo id e retorna centavos inteiros.
@@ -1091,6 +1096,18 @@ function render(){
   $('wrapValor').style.display = val('p_modo')==='qtd'?'none':'';
   $('itensBox').style.display  = chk('op_demonstrativo')?'':'none';
 
+  // d_total: somente leitura quando 'somar itens no total' está ativo (P1.9)
+  const demoAtivo=chk('op_demonstrativo');
+  const dTotalEl=$('d_total');
+  if(dTotalEl){
+    dTotalEl.readOnly=demoAtivo;
+    dTotalEl.style.background=demoAtivo?'#f4f6f9':'';
+    if(demoAtivo){
+      const itCts=itens.reduce((s,i)=>s+strToCents(i.valor),0);
+      dTotalEl.value=((itCts+inputCents('d_encargos')-inputCents('d_desconto'))/100).toFixed(2);
+    }
+  }
+
   // ── modo de assinatura — mostrar/ocultar aviso de testemunhas opcionais ──
   const avTest=$('aviso_testemunhas');
   if(avTest) avTest.style.display=chk('op_assinatura_eletronica')?'':'none';
@@ -1177,7 +1194,30 @@ function validarExportacao(){
       erros.push('Credoras: soma '+money(somaCredCts/100)+' ≠ total '+money(totalCts/100)+' — corrija na seção 01.');
   }
 
-  // P1.5 — Validação de ordem das datas
+  // P1.9 — Desconto não pode superar original + encargos
+  {
+    const descCts=inputCents('d_desconto');
+    const origCts=inputCents('d_original');
+    const encCts2=inputCents('d_encargos');
+    if(descCts>0&&(origCts+encCts2)>0&&descCts>origCts+encCts2)
+      erros.push('Desconto ('+money(descCts/100)+') maior que original + encargos ('+money((origCts+encCts2)/100)+'). Corrija na seção 04.');
+  }
+
+  // P1.9 — CPF dos devedores (aviso; obrigatório será tratado em P1.3)
+  if(devedores.length>0){
+    const cpfs=new Set();
+    devedores.forEach((d,i)=>{
+      if(!d.cpf) return;
+      const lbl='Devedor '+(i+1)+(d.nome?' ('+d.nome+')':'');
+      if(!validarCPF(d.cpf))
+        avisos.push(lbl+': CPF inválido (“'+d.cpf+'”) — verifique antes de exportar.');
+      else{
+        const limpo=d.cpf.replace(/\D/g,'');
+        if(cpfs.has(limpo)) avisos.push(lbl+': CPF duplicado entre devedores.');
+        else cpfs.add(limpo);
+      }
+    });
+  }
   {
     const dAssin  = (!chk('op_datavazia')&&val('f_data')) ? parseDate(val('f_data')) : null;
     const temEntr = inputCents('p_entrada')>0;
