@@ -65,7 +65,19 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Método não permitido.' });
 
-  // Verificação de origem
+  // Camada 1: Verificar token de acesso compartilhado (APP_ACCESS_TOKEN)
+  // X-App-Token é envidado pelo cliente e deve coincidir com a env var do servidor.
+  // Quando APP_ACCESS_TOKEN não está configurado (dev local), o check é pulado.
+  const APP_TOKEN_REQUIRED = process.env.APP_ACCESS_TOKEN;
+  if (APP_TOKEN_REQUIRED) {
+    const provided = req.headers['x-app-token'] || '';
+    if (provided !== APP_TOKEN_REQUIRED) {
+      return res.status(401).json({ error: 'Token de acesso ausente ou inválido (X-App-Token).' });
+    }
+  }
+
+  // Camada 2: Verificar origem (ALLOWED_ORIGIN). Header é falsificável por
+  // clientes não-browser, por isso é camada adicional, não única.
   if (!checkOrigin(req)) {
     return res.status(403).json({ error: 'Origem não autorizada.' });
   }
@@ -80,9 +92,13 @@ module.exports = async function handler(req, res) {
   const { action, ...params } = req.body || {};
   if (!action) return res.status(400).json({ error: 'Parâmetro "action" obrigatório.' });
 
-  // ── action: status ─ não requer credenciais ────────────────────────────
+  // ── action: status ─ retorna configuração sem expor credenciais ───────────
+  // Não requer APP_ACCESS_TOKEN para que a UI possa verificar disponibilidade
+  // sem ter o token configurado no cliente.
   if (action === 'status') {
-    return res.status(200).json({ configured: !!(process.env.ADOBE_SIGN_INTEGRATION_KEY) });
+    return res.status(200).json({
+      configured: !!(process.env.ADOBE_SIGN_INTEGRATION_KEY),
+    });
   }
 
   // Credenciais do servidor

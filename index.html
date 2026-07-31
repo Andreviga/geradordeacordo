@@ -403,6 +403,17 @@ function addMonths(d,m){ const dt=new Date(d.getFullYear(),d.getMonth(),1),day=d
 function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('on'),2800); }
 
 /* ================= centavos (aritmética exata) ================= */
+// Token de acesso ao endpoint /api/adobe-sign (deve coincidir com APP_ACCESS_TOKEN no Vercel).
+// Deixe em branco se APP_ACCESS_TOKEN não estiver configurado no servidor.
+// Veja .env.example e a seção de configuração no README.
+const APP_TOKEN = '';
+
+// Helper: monta headers comuns para chamadas ao endpoint de assinatura
+const apiHeaders = () => {
+  const h = {'Content-Type':'application/json'};
+  if(APP_TOKEN) h['X-App-Token'] = APP_TOKEN;
+  return h;
+};
 // Converte string de valor (vinda de input ou armazenada) para centavos inteiros,
 // sem passar por aritmética de ponto flutuante.
 function strToCents(raw){
@@ -1267,13 +1278,13 @@ async function enviarAdobeSign(){
   $('adobe_result').style.display='none';
   try{
     const upResp=await fetch('/api/adobe-sign',{method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:apiHeaders(),
       body:JSON.stringify({action:'upload',
         filename:nomeArquivo('html'),content:wordHtml(),mimeType:'text/html'})});
     const upData=await upResp.json();
     if(!upResp.ok) throw new Error(upData.error||upData.code||upData.message||'Falha no upload ('+upResp.status+')');
     const agResp=await fetch('/api/adobe-sign',{method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:apiHeaders(),
       body:JSON.stringify({action:'createAgreement',
         transientDocumentId:upData.transientDocumentId,
         name:val('f_titulo')||'Termo de Confissão de Dívida',
@@ -1298,7 +1309,7 @@ async function verificarAdobeSign(){
   if(!st) return;
   try{
     const r=await fetch('/api/adobe-sign',{method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:apiHeaders(),
       body:JSON.stringify({action:'status'})});
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d=await r.json();
