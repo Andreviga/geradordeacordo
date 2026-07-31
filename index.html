@@ -113,6 +113,13 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 #toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:var(--radius);font-size:13px;opacity:0;pointer-events:none;transition:.22s;z-index:99;max-width:90vw}
 #toast.on{opacity:1;transform:translate(-50%,0)}
 
+/* ─── Modal de login ─── */
+.login-overlay{position:fixed;inset:0;background:rgba(18,32,58,.88);z-index:200;display:flex;align-items:center;justify-content:center}
+.login-card{background:var(--surface);border-radius:8px;padding:40px;width:320px;max-width:92vw;box-shadow:0 12px 48px rgba(0,0,0,.4)}
+.login-card h2{margin:0 0 2px;font-size:17px;font-weight:700;color:var(--ink)}
+.login-sub{margin:0 0 28px;font-size:12px;color:var(--ink-2)}
+.login-erro{color:var(--alert);font-size:12.5px;padding:8px 10px;background:#fbeeea;border-radius:var(--radius);margin:-6px 0 14px}
+
 @media(max-width:900px){
   .shell{grid-template-columns:1fr}
   .panel,.stage{height:auto;overflow:visible}
@@ -135,6 +142,22 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 </style>
 </head>
 <body>
+
+<!-- Modal de login — exibido até autenticação bem-sucedida -->
+<div id="loginModal" class="login-overlay">
+  <div class="login-card">
+    <h2>Gerador de Acordo</h2>
+    <div class="login-sub">Colégio Raízes · Acesso restrito</div>
+    <form id="loginForm" onsubmit="fazerLogin(event)">
+      <label for="loginSenha">Senha</label>
+      <input type="password" id="loginSenha" placeholder="••••••••"
+             autocomplete="current-password" required autofocus
+             style="width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:16px;font-size:14px;outline:none">
+      <div id="loginErro" class="login-erro" style="display:none"></div>
+      <button type="submit" class="btn primary" id="loginBtn" style="width:100%">Entrar</button>
+    </form>
+  </div>
+</div>
 
 <header class="topbar">
   <div><h1>Gerador de Acordo</h1><div class="sub">Confissão de dívida · papel timbrado · cláusulas editáveis</div></div>
@@ -403,17 +426,55 @@ function addMonths(d,m){ const dt=new Date(d.getFullYear(),d.getMonth(),1),day=d
 function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('on'),2800); }
 
 /* ================= centavos (aritmética exata) ================= */
-// Token de acesso ao endpoint /api/adobe-sign (deve coincidir com APP_ACCESS_TOKEN no Vercel).
-// Deixe em branco se APP_ACCESS_TOKEN não estiver configurado no servidor.
-// Veja .env.example e a seção de configuração no README.
-const APP_TOKEN = '';
-
-// Helper: monta headers comuns para chamadas ao endpoint de assinatura
-const apiHeaders = () => {
-  const h = {'Content-Type':'application/json'};
-  if(APP_TOKEN) h['X-App-Token'] = APP_TOKEN;
+// ─── Autenticação JWT ──────────────────────────────────────────────
+// Sessão de 8h em sessionStorage. Sem "lembrar-me" — exige novo login
+// a cada sessão ou após expiração.
+function getJWT(){ return sessionStorage.getItem('ger_jwt')||''; }
+function jwtExpirado(t){
+  if(!t) return true;
+  try{
+    const p=JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    return p.exp*1000<Date.now();
+  }catch{ return true; }
+}
+// Helper: monta headers para chamadas s rotas /api/
+const apiHeaders=()=>{
+  const h={'Content-Type':'application/json'};
+  const jwt=getJWT();
+  if(jwt) h['Authorization']='Bearer '+jwt;
   return h;
 };
+async function fazerLogin(e){
+  e.preventDefault();
+  const btn=$('loginBtn'),erro=$('loginErro');
+  btn.disabled=true; btn.textContent='Verificando…'; erro.style.display='none';
+  try{
+    const r=await fetch('/api/login',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({senha:$('loginSenha').value})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Falha no login.');
+    sessionStorage.setItem('ger_jwt',d.token);
+    $('loginModal').style.display='none';
+    $('loginSenha').value='';
+    toast('Acesso autorizado.');
+    verificarAdobeSign();
+  }catch(err){
+    $('loginErro').textContent=err.message;
+    $('loginErro').style.display='';
+  }finally{
+    btn.disabled=false; btn.textContent='Entrar';
+  }
+}
+function verificarAutenticacao(){
+  const jwt=getJWT();
+  if(!jwt||jwtExpirado(jwt)){
+    $('loginModal').style.display='';
+    return false;
+  }
+  $('loginModal').style.display='none';
+  return true;
+}
 // Converte string de valor (vinda de input ou armazenada) para centavos inteiros,
 // sem passar por aritmética de ponto flutuante.
 function strToCents(raw){
@@ -1376,10 +1437,12 @@ async function verificarAdobeSign(){
 $('f_data').value=new Date().toISOString().slice(0,10);
 // Limpar chaves sensíveis que versões anteriores guardavam no navegador
 try{['ger_adobe_key','ger_region'].forEach(k=>localStorage.removeItem(k));}catch(e){}
+$('f_data').value=new Date().toISOString().slice(0,10);
 const cidSalvo=ls('cid'); if(cidSalvo) $('g_clientid').value=cidSalvo;
 loadExample();
 atualizarSignatarios();
-verificarAdobeSign();
+verificarAutenticacao();  // mostra modal se JWT ausente/expirado
+verificarAdobeSign();     // status é isento de auth — seguro chamar antes do login
 </script>
 </body>
 </html>
