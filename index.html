@@ -143,6 +143,7 @@ input[type=range]{width:100%;accent-color:var(--seal)}
   <button class="btn" onclick="baixarPdf()">Baixar PDF</button>
   <button class="btn primary" onclick="printPdf()">Imprimir / PDF</button>
 </header>
+<div id="painelValidacao" style="display:none;position:sticky;top:57px;z-index:29;background:#fbeeea;border-left:4px solid var(--alert);padding:8px 18px;font-size:12.5px"></div>
 
 <div class="shell">
 <form class="panel" id="form" oninput="render()" onchange="render()" onsubmit="return false">
@@ -882,6 +883,72 @@ function render(){
   $('doc').innerHTML=buildDoc();
 }
 
+/* ================= validação pré-exportação ================= */
+function validarExportacao(){
+  if(!_planoAtual) _planoAtual=plano();
+  const p=_planoAtual;
+  const erros=[], avisos=[];
+
+  // Aritmética de parcelas
+  if(p.erro) erros.push('Parcelamento: '+p.erro);
+  else if(!p.aritmOk) erros.push('A soma das parcelas não fecha com o total confessado. Corrija na seção 05.');
+
+  // Credoras múltiplas: soma deve bater com o total
+  if(credoras.length>1){
+    const somaCredCts=credoras.reduce((s,c)=>s+strToCents(c.valor),0);
+    const totalCts=inputCents('d_total');
+    if(somaCredCts>0&&somaCredCts!==totalCts)
+      erros.push('Credoras: soma '+money(somaCredCts/100)+' ≠ total '+money(totalCts/100)+' — corrija na seção 01.');
+  }
+
+  // Tokens: validar sobre o HTML final exportado (artefato real)
+  const html=wordHtml();
+  const T=tokens();
+  // Conjunto derivado programaticamente das chaves de tokens()
+  const validos=new Set([
+    ...Object.keys(T).filter(k=>k!=='__refs'),
+    'tabelaParcelas','listaParcelas','demonstrativo','divisaoCredito'
+  ]);
+  const RE_TOKEN=/\{\{\s*([\w-]+)\s*\}\}/g;
+  const orphans=new Set();
+  let m;
+  while((m=RE_TOKEN.exec(html))!==null){
+    const nome=m[1].trim();
+    if(!validos.has(nome)) orphans.add(nome);
+  }
+  orphans.forEach(nome=>erros.push('Token não reconhecido no documento: {{'+nome+'}}'));
+
+  // Tokens válidos com valor vazio usados em cláusulas ativas (avisos não bloqueantes)
+  const textoAtivo=clausulas.filter(c=>c.on).map(c=>c.titulo+'\n'+c.texto).join('\n');
+  Object.entries(T).forEach(([k,v])=>{
+    if(k==='__refs'||v!=='') return;
+    if(textoAtivo.includes('{{'+k+'}}'))
+      avisos.push('{{'+k+'}} está vazio — verifique se a frase ficará natural sem ele.');
+  });
+
+  return{erros,avisos,html};
+}
+function mostrarPainelValidacao(erros,avisos){
+  const p=$('painelValidacao'); if(!p) return;
+  if(!erros.length&&!avisos.length){ p.style.display='none'; return; }
+  p.style.display='';
+  p.innerHTML=
+    (erros.length?'<strong>Exportação bloqueada:</strong><br>':'')
+    +erros.map(e=>`<span style="color:var(--alert)">⛔ ${esc(e)}</span>`).join('<br>')
+    +(erros.length&&avisos.length?'<br>':'')
+    +(avisos.length&&!erros.length?'<strong style="color:#6b4c00">Avisos:</strong><br>':'')
+    +avisos.map(a=>`<span style="color:#6b4c00">⚠ ${esc(a)}</span>`).join('<br>')
+    +`<button onclick="$('painelValidacao').style.display='none'" `
+    +`style="float:right;background:none;border:none;cursor:pointer;font-size:16px;color:inherit" title="Fechar">✕</button>`;
+}
+// Ponto único de entrada antes de qualquer exportação de documento.
+// Retorna {ok, html} onde html é o wordHtml() já gerado (reaproveitado).
+function podeExportar(){
+  const{erros,avisos,html}=validarExportacao();
+  mostrarPainelValidacao(erros,avisos);
+  return{ok:erros.length===0,html};
+}
+
 /* ================= exportar ================= */
 function docCss(){return `
 body{font-family:"Times New Roman",serif;font-size:11.5pt;line-height:1.5;text-align:justify}
@@ -935,15 +1002,20 @@ function nomeArquivo(ext){
   return `Acordo-${d}-${new Date().toISOString().slice(0,10)}.${ext}`;
 }
 function exportWord(){
-  try{ baixar(new Blob(['\ufeff'+wordHtml()],{type:'application/msword'}),nomeArquivo('doc'));
+  const{ok,html}=podeExportar(); if(!ok) return;
+  try{ baixar(new Blob(['\ufeff'+html],{type:'application/msword'}),nomeArquivo('doc'));
        toast('Word gerado. Abra e salve como .docx se quiser.'); }
-  catch(e){ abrirNovaAba(); }
+  catch(e){ abrirNovaAba(html); }
 }
-function printPdf(){ try{ window.print(); }catch(e){ abrirNovaAba(); } }
-function abrirNovaAba(){
+function printPdf(){
+  const{ok,html}=podeExportar(); if(!ok) return;
+  try{ window.print(); }catch(e){ abrirNovaAba(html); }
+}
+function abrirNovaAba(html){
+  html=html||wordHtml();
   const w=window.open('','_blank');
   if(!w){ toast('Permita pop-ups para abrir o documento em nova aba.'); return; }
-  w.document.write(wordHtml()); w.document.close();
+  w.document.write(html); w.document.close();
   toast('Aberto em nova aba — use Ctrl+P para salvar em PDF.');
 }
 function copiar(t){ try{navigator.clipboard.writeText(t); toast(t+' copiado');}catch(e){} }
@@ -1017,7 +1089,8 @@ async function salvarDrive(){
 }
 async function salvarWordDrive(){
   if(!gToken) return toast('Conecte o Google Drive primeiro.');
-  try{ const j=await enviarArquivo(nomeArquivo('doc'),'application/msword',wordHtml());
+  const{ok,html}=podeExportar(); if(!ok) return;
+  try{ const j=await enviarArquivo(nomeArquivo('doc'),'application/msword',html);
        toast('Word enviado ao Drive: '+j.name); }
   catch(e){ toast('Não foi possível enviar: '+e.message); }
 }
@@ -1071,6 +1144,7 @@ $('tokenList').innerHTML = 'Tokens (clique para copiar): '
     .map(t=>`<code onclick="navigator.clipboard&&navigator.clipboard.writeText('${t}');toast('${t} copiado')">${t}</code>`).join(' ');
 /* ================= PDF (html2pdf.js) ================= */
 async function baixarPdf(){
+  const{ok}=podeExportar(); if(!ok) return;
   toast('Gerando PDF…');
   try{
     await html2pdf().set({
@@ -1084,6 +1158,7 @@ async function baixarPdf(){
 }
 async function salvarPdfDrive(){
   if(!gToken) return toast('Conecte o Google Drive primeiro.');
+  const{ok}=podeExportar(); if(!ok) return;
   toast('Gerando PDF para o Drive…');
   try{
     const blob=await html2pdf().set({
@@ -1126,6 +1201,7 @@ function atualizarSignatarios(){
 async function enviarAdobeSign(){
   const key=val('adobe_key');
   if(!key) return toast('Informe a Integration Key do Adobe Acrobat Sign.');
+  const{ok}=podeExportar(); if(!ok) return;
   const signers=[];
   devedores.forEach((_,i)=>{
     const nome=($('asn_nome'+i)||{}).value||'';
