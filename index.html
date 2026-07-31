@@ -251,7 +251,13 @@ input[type=range]{width:100%;accent-color:var(--seal)}
       </div>
       <div class="row"><div><label>Dados para pagamento (opcional)</label><input type="text" id="p_dados" placeholder="Banco / agência / conta ou chave PIX"></div></div>
       <div class="calc" id="calcParcelas"></div>
-      <div class="check"><input type="checkbox" id="op_diautil" checked><span>Prorrogar vencimento em dia não útil para o 1º dia útil seguinte</span></div>
+      <div class="check"><input type="checkbox" id="op_diautil" checked><span>Prorrogar vencimento em dia não útil para o 1º dia útil seguinte <small>Inclui feriados nacionais, SP estadual (09/07), SP capital (25/01), Carnaval, Sexta-feira Santa e Corpus Christi.</small></span></div>
+      <div id="bloco_feriados" style="display:none;margin-top:6px">
+        <div class="row"><div>
+          <label>Feriados adicionais do colégio (recessos, datas próprias)</label>
+          <textarea id="p_feriados_manuais" rows="3" placeholder="Ex.&#10;2026-12-24&#10;25/01/2027&#10;Um por linha, vírgula ou ponto-e-vírgula&#10;Formatos aceitos: AAAA-MM-DD ou DD/MM/AAAA"></textarea>
+        </div></div>
+      </div>
     </div>
   </details>
 
@@ -438,6 +444,72 @@ function addMonths(d,m){ const dt=new Date(d.getFullYear(),d.getMonth(),1),day=d
   const last=new Date(dt.getFullYear(),dt.getMonth()+1,0).getDate(); dt.setDate(Math.min(day,last)); return dt; }
 function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('on'),2800); }
 
+/* ================= feriados (P1.4) ================= */
+// Cálculo da Páscoa — algoritmo de Gauss/Meeus/Jones/Butcher
+const _pascoa={};
+function pascoa(ano){
+  if(_pascoa[ano]) return _pascoa[ano];
+  const a=ano%19,b=Math.floor(ano/100),c=ano%100;
+  const d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25);
+  const g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30;
+  const i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7;
+  const m=Math.floor((a+11*h+22*l)/451);
+  const mes=Math.floor((h+l-7*m+114)/31);
+  const dia=((h+l-7*m+114)%31)+1;
+  return(_pascoa[ano]=new Date(ano,mes-1,dia));
+}
+function addDias(d,n){ const r=new Date(d); r.setDate(r.getDate()+n); return r; }
+const pad2=n=>String(n).padStart(2,'0');
+const fmtMD =d=>pad2(d.getMonth()+1)+'-'+pad2(d.getDate());   // MM-DD
+const fmtAMD=d=>d.getFullYear()+'-'+fmtMD(d);               // AAAA-MM-DD
+
+// Feriados fixos: nacionais + SP estadual (09/07) + SP capital (25/01)
+// Parâmetro imutável — novos municípios: adicionar aqui sem recompilar
+const FERIADOS_FIXOS=new Set([
+  '01-01','04-21','05-01','09-07','10-12','11-02','11-15','11-20','12-25', // nacionais
+  '07-09',  // SP estadual — Revolução Constitucionalista
+  '01-25',  // SP capital  — Aniversário de São Paulo
+]);
+
+// Feriados móveis calculados a partir da Páscoa (cache por ano)
+const _fmov={};
+function feriadosMoveis(ano){
+  if(_fmov[ano]) return _fmov[ano];
+  const p=pascoa(ano);
+  return(_fmov[ano]=new Set([
+    fmtMD(addDias(p,-48)), // Segunda de Carnaval
+    fmtMD(addDias(p,-47)), // Terça de Carnaval
+    fmtMD(addDias(p, -2)), // Sexta-feira Santa
+    fmtMD(addDias(p, 60)), // Corpus Christi
+  ]));
+}
+
+// Converte string de feriados manuais para Set de 'AAAA-MM-DD'
+// Aceita: AAAA-MM-DD ou DD/MM/AAAA, separados por quebra de linha / vírgula / ponto-e-vírgula
+function parseFeriadosManuais(raw){
+  if(raw===undefined) raw=val('p_feriados_manuais');
+  const set=new Set();
+  if(!raw) return set;
+  raw.split(/[\n,;]+/).forEach(s=>{
+    s=s.trim();
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)){ set.add(s); return; }
+    if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){
+      const[dd,mm,aaaa]=s.split('/');
+      set.add(`${aaaa}-${mm}-${dd}`);
+    }
+  });
+  return set;
+}
+
+// Retorna true se 'data' é feriado (fixo, móvel ou manual)
+function eFeriado(data,ferManuais){
+  const md=fmtMD(data);
+  if(FERIADOS_FIXOS.has(md)) return true;
+  if(feriadosMoveis(data.getFullYear()).has(md)) return true;
+  if(ferManuais&&ferManuais.has(fmtAMD(data))) return true;
+  return false;
+}
+
 /* ================= centavos (aritmética exata) ================= */
 // ─── Autenticação JWT ──────────────────────────────────────────────
 // Sessão de 8h em sessionStorage. Sem "lembrar-me" — exige novo login
@@ -614,7 +686,7 @@ const CAMPOS_FORMULARIO=new Set([
   // Seção 04 — Dívida
   'd_origem','d_periodo','d_original','d_encargos','d_desconto','d_total','op_demonstrativo',
   // Seção 05 — Pagamento
-  'p_entrada','p_entradadata','p_modo','p_qtd','p_valor','p_data1','p_meio','p_dados','op_diautil',
+  'p_entrada','p_entradadata','p_modo','p_qtd','p_valor','p_data1','p_meio','p_dados','op_diautil','p_feriados_manuais',
   // Seção 06 — Percentuais
   'e_multamora','e_juros','e_multapenal','e_honorarios','e_indice','e_tolerancia',
   // Seção 08 — Papel timbrado
@@ -781,10 +853,14 @@ function plano(){
 }
 function vencimentos(p){
   const d1=parseDate(val('p_data1')); if(!d1) return [];
+  const ferManuais=chk('op_diautil')?parseFeriadosManuais():null;
   const out=[];
   for(let i=0;i<p.n;i++){
     let d=addMonths(d1,i);
-    if(chk('op_diautil')) while(d.getDay()===0||d.getDay()===6) d=new Date(d.getFullYear(),d.getMonth(),d.getDate()+1);
+    if(chk('op_diautil')){
+      while(d.getDay()===0||d.getDay()===6||eFeriado(d,ferManuais))
+        d=new Date(d.getFullYear(),d.getMonth(),d.getDate()+1);
+    }
     out.push({n:i+1,data:d,valor:i===p.n-1?p.ultima:p.parcela});
   }
   return out;
@@ -973,6 +1049,10 @@ function render(){
   // ── modo de assinatura — mostrar/ocultar aviso de testemunhas opcionais ──
   const avTest=$('aviso_testemunhas');
   if(avTest) avTest.style.display=chk('op_assinatura_eletronica')?'':'none';
+
+  // ── feriados manuais — mostrar bloco apenas quando prorrogacao está ativa ──
+  const bf=$('bloco_feriados');
+  if(bf) bf.style.display=chk('op_diautil')?'':'none';
 
   // ── credoras ──
   const totalCts=inputCents('d_total');
