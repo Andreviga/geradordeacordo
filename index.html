@@ -821,12 +821,13 @@ function qualDevedor(d){
   if(d.contato) s+=`, contato ${esc(d.contato)}`;
   return s+'.';
 }
-function timbreHtml(){
+function timbreHtml(T){
   if(!chk('op_timbre')) return '';
-  const linhas = val('t_texto').split(/\n/).filter(Boolean).map(l=>esc(l)).join('<br>');
+  // Aplicar subst() para que tokens como {{credora}} funcionem no cabeçalho
+  const linhas = subst(val('t_texto'),T).split(/\n/).filter(Boolean).map(l=>esc(l)).join('<br>');
   return `<div class="lh-header"><div class="lh-top"><img src="${LOGO}" alt="">`
-    + `<div class="lh-txt"><b>${esc(val('t_linha1'))}</b><br>${linhas}</div></div><div class="lh-rule"></div></div>`
-    + `<div class="lh-footer"><div class="lh-rule"></div><span>${esc(val('t_rodape'))}</span></div>`;
+    + `<div class="lh-txt"><b>${esc(subst(val('t_linha1'),T))}</b><br>${linhas}</div></div><div class="lh-rule"></div></div>`
+    + `<div class="lh-footer"><div class="lh-rule"></div><span>${esc(subst(val('t_rodape'),T))}</span></div>`;
 }
 function marcaHtml(){
   if(!chk('op_marca')) return '';
@@ -834,7 +835,8 @@ function marcaHtml(){
 }
 function buildDoc(){
   const T=tokens(), multi=credoras.length>1, md=devedores.length>1;
-  let h=`<h1>${esc(val('f_titulo'))}</h1>`;
+  // Título também passa por subst() para resolver tokens (C1)
+  let h=`<h1>${esc(subst(val('f_titulo'),T))}</h1>`;
   h+=`<p><span class="lbl">${multi?'Credoras:':'Credora:'}</span></p>`;
   h+= multi ? credoras.map((c,i)=>`<p class="bul">${i+1}. ${qualCredora(c)}</p>`).join('')
             : (credoras[0]?`<p>${qualCredora(credoras[0])}</p>`:'');
@@ -865,7 +867,7 @@ function buildDoc(){
     <p>1. Nome: ${esc(val('t1_nome'))||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(val('t1_cpf'))||'____________________'}</p>
     <p>2. Nome: ${esc(val('t2_nome'))||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(val('t2_cpf'))||'____________________'}</p></div>`;
 
-  return marcaHtml()+timbreHtml()+`<div class="sheet">${h}</div>`;
+  return marcaHtml()+timbreHtml(T)+`<div class="sheet">${h}</div>`;
 }
 
 /* ================= render ================= */
@@ -913,6 +915,28 @@ function render(){
 }
 
 /* ================= validação pré-exportação ================= */
+// Função pura: clasifica tokens no HTML exportado.
+// validos: Set<string> de nomes de tokens válidos.
+// Retorna {erros, avisos} para uso em validarExportacao() e nos testes.
+function classificarTokensNoHTML(html, validos){
+  const erros=[], avisos=[];
+  // Regex ampliada: captura QUALQUER conteudo entre {{ e }}, incluindo espacos,
+  // dois pontos e outros caracteres invalidos como nome de token.
+  const RE=/\{\{([^}]*)\}\}/g;
+  const orphans=new Set();
+  let m;
+  while((m=RE.exec(html))!==null){
+    const nome=m[1].trim();
+    if(!validos.has(nome)) orphans.add(nome||'(vazio)');
+  }
+  orphans.forEach(nome=>erros.push('Token não reconhecido no documento: {{'+nome+'}}'));
+  // Aviso não bloqueante: chaves desbalanceadas (ex: {{foo sem fechamento)
+  const abre=(html.match(/\{\{/g)||[]).length;
+  const fecha=(html.match(/\}\}/g)||[]).length;
+  if(abre!==fecha)
+    avisos.push(`Chave desbalanceada: ${abre} × “{{” vs ${fecha} × “}}” no documento — verifique as cláusulas.`);
+  return{erros,avisos};
+}
 function validarExportacao(){
   if(!_planoAtual) _planoAtual=plano();
   const p=_planoAtual;
@@ -933,19 +957,18 @@ function validarExportacao(){
   // Tokens: validar sobre o HTML final exportado (artefato real)
   const html=wordHtml();
   const T=tokens();
-  // Conjunto derivado programaticamente das chaves de tokens()
+  // Tokens: validar sobre o HTML final exportado.
+  // wordHtml() agora aplica subst() em cabecalho, rodapé e título (C1) —
+  // a validação cobre todos os caminhos de exportação.
+  const html=wordHtml();
+  const T=tokens();
   const validos=new Set([
     ...Object.keys(T).filter(k=>k!=='__refs'),
     'tabelaParcelas','listaParcelas','demonstrativo','divisaoCredito'
   ]);
-  const RE_TOKEN=/\{\{\s*([\w-]+)\s*\}\}/g;
-  const orphans=new Set();
-  let m;
-  while((m=RE_TOKEN.exec(html))!==null){
-    const nome=m[1].trim();
-    if(!validos.has(nome)) orphans.add(nome);
-  }
-  orphans.forEach(nome=>erros.push('Token não reconhecido no documento: {{'+nome+'}}'));
+  const{erros:errosToken,avisos:avisosToken}=classificarTokensNoHTML(html,validos);
+  erros.push(...errosToken);
+  avisos.push(...avisosToken);
 
   // Tokens válidos com valor vazio usados em cláusulas ativas (avisos não bloqueantes)
   const textoAtivo=clausulas.filter(c=>c.on).map(c=>c.titulo+'\n'+c.texto).join('\n');
@@ -1003,18 +1026,20 @@ function corpoHtml(){
   return clone.innerHTML;
 }
 function wordHtml(){
+  // Chama tokens() uma única vez para subst() nos campos do timbrado (C1)
+  const T=tokens();
   const timbre=chk('op_timbre'), marca=chk('op_marca');
   const header = timbre ? `<div style='mso-element:header' id="h1"><p class=MsoHeader>
      <table width="100%" cellpadding="0" cellspacing="0" style="border:none"><tr>
        <td width="150" style="border:none;padding:0"><img src="${LOGO}" width="140"></td>
-       <td style="border:none;padding:0" class="lh-txt"><b>${esc(val('t_linha1'))}</b><br>${esc(val('t_texto'))}</td>
+       <td style="border:none;padding:0" class="lh-txt"><b>${esc(subst(val('t_linha1'),T))}</b><br>${esc(subst(val('t_texto'),T))}</td>
      </tr></table><div class="lh-rule"></div>
      ${marca?`<img src="${MARCA}" width="380" style="position:absolute;margin-left:80pt;margin-top:220pt;z-index:-1;mso-position-horizontal:center;mso-position-horizontal-relative:page;mso-position-vertical-relative:page;mso-position-vertical:center">`:''}
      </p></div>` : '';
   const footer = timbre ? `<div style='mso-element:footer' id="f1"><p class=MsoFooter><div class="lh-rule"></div>
-     <div class="lh-foot">${esc(val('t_rodape'))}</div></p></div>` : '';
+     <div class="lh-foot">${esc(subst(val('t_rodape'),T))}</div></p></div>` : '';
   return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-<head><meta charset="utf-8"><title>${esc(val('f_titulo'))}</title>
+<head><meta charset="utf-8"><title>${esc(subst(val('f_titulo'),T))}</title>
 <style>
 @page WordSection1{size:21cm 29.7cm;margin:${timbre?'3.6cm 2cm 2.4cm 2cm':'2.5cm 2cm'};mso-header-margin:1cm;mso-footer-margin:1cm;${timbre?'mso-header:h1;mso-footer:f1;':''}}
 div.WordSection1{page:WordSection1}
