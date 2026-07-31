@@ -34,20 +34,20 @@ async function mockAPIs(page) {
       body:        JSON.stringify({ token: jwtFakeCliente() }),
     });
   });
-  // Mock do adobe-sign
+  // Mock do adobe-sign (legado) e da nova rota /api/assinatura
   await page.route('/api/adobe-sign', async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ configured: false }) });
+  });
+  await page.route('/api/assinatura', async route => {
     let action;
     try { action = route.request().postDataJSON()?.action; } catch { action = null; }
     if (action === 'status') {
-      await route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({ configured: false }),
-      });
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ configured: true, provedor: 'manual', features: { whatsapp: false } }) });
     } else {
-      await route.fulfill({
-        status: 401, contentType: 'application/json',
-        body: JSON.stringify({ error: 'Mock: não autorizado' }),
-      });
+      await route.fulfill({ status: 401, contentType: 'application/json',
+        body: JSON.stringify({ error: 'Mock: não autorizado' }) });
     }
   });
 }
@@ -75,6 +75,9 @@ test.describe('Smoke tests — Gerador de Acordo', () => {
     // Aguardar inicialização do JS (modal de login deve aparecer)
     await expect(page.locator('#loginModal')).toBeVisible({ timeout: 5000 });
 
+    if (erros.length) {
+      console.log('Erros capturados:', erros.join('\n'));
+    }
     expect(erros, 'Erros no console:\n' + erros.join('\n')).toHaveLength(0);
   });
 

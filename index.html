@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -112,6 +112,9 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 
 #toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:var(--radius);font-size:13px;opacity:0;pointer-events:none;transition:.22s;z-index:99;max-width:90vw}
 #toast.on{opacity:1;transform:translate(-50%,0)}
+/* Âncoras de posicionamento ZapSign (texto branco sobre branco, invisível) */
+.sign-anchor{color:#fff;font-size:1pt;line-height:0;display:block;height:0;overflow:hidden}
+@media print{.sign-anchor{color:#fff}}
 
 /* ─── Modal de login ─── */
 .login-overlay{position:fixed;inset:0;background:rgba(18,32,58,.88);z-index:200;display:flex;align-items:center;justify-content:center}
@@ -347,26 +350,30 @@ input[type=range]{width:100%;accent-color:var(--seal)}
   </details>
 
   <details class="group" ontoggle="if(this.open) atualizarSignatarios()">
-    <summary><span class="num">11</span> Assinatura Digital (Adobe Acrobat Sign)</summary>
+    <summary><span class="num">11</span> Assinatura Digital</summary>
     <div class="body">
-      <div class="status" id="adobe_status">Verificando configuração…</div>
+      <div class="status" id="ass_status">Verificando configuração…</div>
       <div class="row">
         <div><label>Mensagem para os signatários</label>
-          <input type="text" id="adobe_msg" value="Por favor, assine o Termo de Confissão de Dívida conforme acordado."></div>
+          <input type="text" id="ass_msg" value="Você recebeu um convite para assinar eletronicamente um documento do Colégio Raízes. Clique em Assinar documento para conferir o conteúdo e concluir a assinatura com o código enviado ao seu e-mail. Prazo: 15 dias."></div>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="op_whatsapp">
+        <span>Enviar link por WhatsApp (ZapSign) <small style="display:block">Custo: R$ 0,50 por signatário. Padrão desligado — envie o link manualmente pelo WhatsApp de graça.</small></span>
       </div>
       <div class="row">
         <div>
-          <label>Signatários (e-mail de cada devedor)</label>
-          <p class="hint">O Adobe Acrobat Sign enviará um link de assinatura por e-mail a cada signatário. Os campos são preenchidos automaticamente com os dados da seção 02.</p>
-          <div id="adobe_signers"></div>
+          <label>Signatários</label>
+          <p class="hint">Preencha o e-mail de cada signatário. O link de assinatura será enviado por e-mail.</p>
+          <div id="ass_signers"></div>
           <button type="button" class="btn small" onclick="atualizarSignatarios()" style="margin-top:6px">↺ Atualizar da lista de devedores</button>
         </div>
       </div>
       <div class="row r2" style="margin-top:12px">
-        <div><button type="button" id="btnEnviarAssinatura" class="btn primary small" disabled style="width:100%" onclick="enviarAdobeSign()">✉ Enviar para Assinatura Digital</button></div>
+        <div><button type="button" id="btnEnviarAssinatura" class="btn primary small" disabled style="width:100%" onclick="enviarAssinatura()">✉ Enviar para Assinatura Digital</button></div>
         <div><button type="button" class="btn small" style="width:100%" onclick="baixarPdf()">⬇ Baixar PDF (assinatura manual)</button></div>
       </div>
-      <div id="adobe_result" style="display:none;margin-top:10px"></div>
+      <div id="ass_result" style="display:none;margin-top:10px"></div>
     </div>
   </details>
 </form>
@@ -458,7 +465,7 @@ async function fazerLogin(e){
     $('loginModal').style.display='none';
     $('loginSenha').value='';
     toast('Acesso autorizado.');
-    verificarAdobeSign();
+    verificarAssinatura();
   }catch(err){
     $('loginErro').textContent=err.message;
     $('loginErro').style.display='';
@@ -611,7 +618,7 @@ const CAMPOS_FORMULARIO=new Set([
   // Seção 10 — Google Drive
   'g_clientid',
   // Seção 11 — Assinatura
-  'adobe_msg'
+  'ass_msg','op_whatsapp'
 ]);
 
 /* ---------- listas dinâmicas ---------- */
@@ -921,9 +928,9 @@ function buildDoc(){
   const fd=parseDate(val('f_data'));
   h+=`<p style="text-align:center;margin-top:22px">${esc(val('f_local'))}, ${(!chk('op_datavazia')&&fd)?extDate(fd):'______ de __________________ de '+(fd?fd.getFullYear():new Date().getFullYear())}.</p>`;
 
-  const sign=(nome,papel)=>`<div class="sign"><div class="line"></div><div class="who">${esc(nome)}</div><div class="role">${esc(papel)}</div></div>`;
-  credoras.forEach(c=>{ h+=sign(c.nome,'Credora'+(c.rep?' — '+c.rep:'')); });
-  devedores.forEach(d=>{ h+=sign(d.nome,'Devedor(a)'+(md?' Solidário(a)':'')); });
+  const sign=(nome,papel,ancora)=>`<div class="sign">${ancora?`<span class="sign-anchor">${esc(ancora)}</span>`:''}<div class="line"></div><div class="who">${esc(nome)}</div><div class="role">${esc(papel)}</div></div>`;
+  credoras.forEach((c,i)=>{ h+=sign(c.nome,'Credora'+(c.rep?' — '+c.rep:''),`<<credora${i+1}>>`); });
+  devedores.forEach((d,i)=>{ h+=sign(d.nome,'Devedor(a)'+(md?' Solidário(a)':''),`<<devedor${i+1}}>>`); });
   h+=`<div class="wit"><p class="lbl">Testemunhas:</p>
     <p>1. Nome: ${esc(val('t1_nome'))||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(val('t1_cpf'))||'____________________'}</p>
     <p>2. Nome: ${esc(val('t2_nome'))||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(val('t2_cpf'))||'____________________'}</p></div>`;
@@ -1346,100 +1353,136 @@ async function salvarPdfDrive(){
   }catch(e){ toast('Não foi possível salvar PDF: '+e.message); }
 }
 
-/* ================= Adobe Acrobat Sign ================= */
+/* ================= Assinatura Digital ================= */
 function atualizarSignatarios(){
-  const box=$('adobe_signers');
-  if(!devedores.length){
-    box.innerHTML='<p class="hint">Adicione devedores na seção 02 para preencher automaticamente.</p>';
+  const box=$('ass_signers');
+  if(!box||!devedores.length){
+    if(box) box.innerHTML='<p class="hint">Adicione devedores na seção 02 para preencher automaticamente.</p>';
     return;
   }
-  // Preserva e-mails já digitados
-  const emails=devedores.map((_,i)=>{ const el=$('asn_email'+i); return el?el.value:''; });
-  box.innerHTML=devedores.map((d,i)=>
-    `<div class="card" style="padding:8px 10px;margin-bottom:6px">
-  <div class="row r2">
-    <div><label>Nome do signatário ${i+1}</label><input type="text" id="asn_nome${i}" value="${esc(d.nome)}"></div>
-    <div><label>E-mail</label><input type="email" id="asn_email${i}" value="${esc(emails[i]||(d.contato&&d.contato.includes('@')?d.contato:''))}"></div>
-  </div>
-</div>`).join('');
+  // Preserva valores já digitados
+  const prev=devedores.map((_,i)=>({
+    email:(($('asn_email'+i))||{}).value||'',
+    tel:  (($('asn_tel'+i))||{}).value||'',
+  }));
+  box.innerHTML=devedores.map((d,i)=>{
+    const ep=prev[i].email||(d.contato&&d.contato.includes('@')?d.contato:'');
+    const tp=prev[i].tel  ||(d.contato&&!d.contato.includes('@')?d.contato.replace(/\D/g,''):'');
+    return '<div class="card" style="padding:8px 10px;margin-bottom:6px">'
+      +'<div class="card-head"><strong>Signatário '+(i+1)+'</strong></div>'
+      +'<div class="row r2">'
+      +'<div><label>Nome</label><input type="text" id="asn_nome'+i+'" value="'+esc(d.nome)+'"></div>'
+      +'<div><label>E-mail *</label><input type="email" id="asn_email'+i+'" value="'+esc(ep)+'" placeholder="obrigatório"></div>'
+      +'</div>'
+      +'<div class="row r3">'
+      +'<div><label>Telefone (WhatsApp)</label><input type="tel" id="asn_tel'+i+'" value="'+esc(tp)+'" placeholder="11999999999"></div>'
+      +'<div><label>CPF</label><input type="text" id="asn_cpf'+i+'" value="'+esc(d.cpf||'')+'"></div>'
+      +'<div><label>Papel</label><select id="asn_papel'+i+'"><option value="devedor">Devedor(a)</option><option value="testemunha">Testemunha</option></select></div>'
+      +'</div></div>';
+  }).join('');
 }
-async function enviarAdobeSign(){
-  const{ok}=podeExportar(); if(!ok) return;
-  const signers=[];
-  devedores.forEach((_,i)=>{
-    const nome=($('asn_nome'+i)||{}).value||'';
-    const email=($('asn_email'+i)||{}).value||'';
-    if(email.includes('@')) signers.push({name:nome||email,email,order:i+1});
-  });
-  if(!signers.length) return toast('Informe ao menos um e-mail de signatário na seção 11.');
-  $('adobe_status').innerHTML='Enviando documento para o Adobe Acrobat Sign…';
-  $('adobe_status').className='status aviso';
-  $('adobe_result').style.display='none';
-  try{
-    const upResp=await fetch('/api/adobe-sign',{method:'POST',
-      headers:apiHeaders(),
-      body:JSON.stringify({action:'upload',
-        filename:nomeArquivo('html'),content:wordHtml(),mimeType:'text/html'})});
-    const upData=await upResp.json();
-    if(!upResp.ok) throw new Error(upData.error||upData.code||upData.message||'Falha no upload ('+upResp.status+')');
-    const agResp=await fetch('/api/adobe-sign',{method:'POST',
-      headers:apiHeaders(),
-      body:JSON.stringify({action:'createAgreement',
-        transientDocumentId:upData.transientDocumentId,
-        name:val('f_titulo')||'Termo de Confissão de Dívida',
-        message:val('adobe_msg'),signers})});
-    const agData=await agResp.json();
-    if(!agResp.ok) throw new Error(agData.error||agData.code||agData.message||'Falha ao criar acordo ('+agResp.status+')');
-    $('adobe_status').innerHTML='<b style="color:var(--seal)">✓ Enviado!</b> ID: <code>'+agData.id+'</code>';
-    $('adobe_status').className='status ok';
-    $('adobe_result').style.display='';
-    $('adobe_result').innerHTML='<div class="calc">Acordo criado no Adobe Acrobat Sign.<br><b>ID:</b> <code>'+agData.id+'</code><br>Os signatários receberão um e-mail com o link para assinar eletronicamente.</div>';
-    toast('Enviado para assinatura digital!');
-  }catch(e){
-    $('adobe_status').innerHTML='<span style="color:var(--alert)">Erro: '+esc(e.message)+'</span>';
-    $('adobe_status').className='status erro';
-    toast('Erro Adobe Sign: '+e.message);
-  }
-}
-
-// Verifica se Adobe Acrobat Sign está configurado no servidor
-async function verificarAdobeSign(){
-  const st=$('adobe_status'), btn=$('btnEnviarAssinatura');
+// Verifica configuração do provedor de assinatura no servidor
+async function verificarAssinatura(){
+  const st=$('ass_status'), btn=$('btnEnviarAssinatura');
   if(!st) return;
   try{
-    const r=await fetch('/api/adobe-sign',{method:'POST',
-      headers:apiHeaders(),
+    const r=await fetch('/api/assinatura',{method:'POST',headers:apiHeaders(),
       body:JSON.stringify({action:'status'})});
+    if(r.status===401){ verificarAutenticacao(); return; }
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d=await r.json();
-    if(d.configured){
-      st.innerHTML='✓ Adobe Acrobat Sign configurado. Preencha os e-mails e envie para assinatura.';
-      st.className='status ok';
-      if(btn) btn.disabled=false;
-    }else{
-      st.innerHTML='Assinatura digital não configurada neste ambiente. '
-        +'Configure <code>ADOBE_SIGN_INTEGRATION_KEY</code> e '
-        +'<code>ADOBE_SIGN_REGION</code> no painel do Vercel.';
-      st.className='status aviso';
-      if(btn) btn.disabled=true;
-    }
+    const prov={zapsign:'ZapSign',adobe:'Adobe Sign',manual:'Gov.br (manual)'}[d.provedor]||d.provedor||'manual';
+    st.innerHTML='✓ Assinatura via <b>'+esc(prov)+'</b> configurada.';
+    st.className='status ok';
+    if(btn) btn.disabled=false;
   }catch(e){
-    st.innerHTML='API de assinatura não encontrada. Use <code>vercel dev</code> com '
-      +'<code>.env.local</code> para testar localmente.';
+    st.innerHTML='Use <code>vercel dev</code> com <code>.env.local</code> para testar localmente.';
     st.className='status';
     if(btn) btn.disabled=true;
   }
 }
+async function gerarPDFBase64(){
+  const blob=await html2pdf().set({
+    margin:0,html2canvas:{scale:2,useCORS:true,scrollY:0},
+    jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
+  }).from($('doc')).output('blob');
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result.split(',')[1]);
+    reader.onerror=reject;
+    reader.readAsDataURL(blob);
+  });
+}
+async function enviarAssinatura(){
+  const{ok}=podeExportar(); if(!ok) return;
+  const signatarios=[];
+  devedores.forEach((_,i)=>{
+    const nome =($('asn_nome' +i)||{}).value||'';
+    const email=($('asn_email'+i)||{}).value||'';
+    const tel  =($('asn_tel'  +i)||{}).value||'';
+    const papel=($('asn_papel'+i)||{}).value||'devedor';
+    const cpf  =($('asn_cpf'  +i)||{}).value||'';
+    if(email.trim()) signatarios.push({nome,email:email.trim(),telefone:tel,papel,cpf});
+  });
+  if(!signatarios.length) return toast('Informe ao menos um e-mail de signatário.');
+  const st=$('ass_status'),res=$('ass_result'),btn=$('btnEnviarAssinatura');
+  st.innerHTML='Gerando PDF e enviando…'; st.className='status aviso';
+  res.style.display='none'; btn.disabled=true;
+  try{
+    toast('Gerando PDF…');
+    const pdfBase64=await gerarPDFBase64();
+    const r=await fetch('/api/assinatura',{method:'POST',headers:apiHeaders(),
+      body:JSON.stringify({action:'enviar',pdfBase64,signatarios,
+        nomeDocumento:val('f_titulo')||'Termo de Confissão de Dívida',
+        mensagem:val('ass_msg'),
+        externalId:'acordo-'+Date.now().toString(36).toUpperCase(),
+        enviarWhatsapp:chk('op_whatsapp'),
+        credoraNome:(credoras[0]||{}).nome||''})});
+    const d=await r.json();
+    if(r.status===401){ verificarAutenticacao(); return; }
+    if(!r.ok&&!d.id) throw new Error(d.error||'Falha ('+r.status+')');
+    st.className='status ok';
+    if(!d.url||!d.url.length){
+      st.innerHTML='<b>✓ Pronto para assinatura manual (gov.br).</b>';
+      let html='<div class="calc">'+(d.aviso?'<div style="color:#6b4c00;margin-bottom:8px">⚠ '+esc(d.aviso)+'</div>':'')
+        +'<b>SHA-256:</b> <code style="font-size:11px;word-break:break-all">'+esc(d.sha256||'')+'</code> '
+        +'<button onclick="copiar(\''+(d.sha256||'')+'\')" class="btn mini">Copiar</button><br><br>'
+        +'<b>Instruções (assinatura sequencial via gov.br):</b><ol style="margin:8px 0 0 20px;font-size:12px">';
+      (d.instrucoes||[]).filter(l=>l.match(/^\d/)).forEach(l=>{
+        html+='<li style="margin-bottom:4px">'+esc(l.replace(/^\d+\.\s*/,''))+'</li>';
+      });
+      html+='</ol></div>';
+      res.innerHTML=html;
+    }else{
+      const prov={zapsign:'ZapSign',adobe:'Adobe Sign'}[d.provedor]||d.provedor;
+      st.innerHTML='<b>✓ Enviado via '+esc(prov)+'!</b> ID: <code>'+esc(d.id)+'</code>';
+      let html='<div class="calc"><b>Links de assinatura</b> (válidos 15 dias):<br><br>';
+      (d.url||[]).forEach(s=>{
+        html+='<div style="margin-bottom:8px"><b>'+esc(s.nome||s.email)+'</b> &mdash; '+esc(s.email)+'<br>'
+          +'<a href="'+esc(s.url)+'" target="_blank" rel="noopener" class="btn mini">Abrir</a> '
+          +'<button onclick="copiar(\'' +esc(s.url)+'\')" class="btn mini">Copiar link</button>'
+          +'<small style="display:block;color:var(--ink-2);margin-top:2px">Cole no WhatsApp para assinar gratuitamente.</small></div>';
+      });
+      if(d.aviso) html+='<div style="color:#6b4c00;margin-top:8px">⚠ '+esc(d.aviso)+'</div>';
+      html+='</div>';
+      res.innerHTML=html;
+    }
+    res.style.display='';
+    toast('Documento enviado para assinatura!');
+  }catch(e){
+    st.innerHTML='<span style="color:var(--alert)">Erro: '+esc(e.message)+'</span>';
+    st.className='status erro';
+    toast('Erro: '+e.message);
+  }finally{ btn.disabled=false; }
+}
+async function enviarAdobeSign(){ return enviarAssinatura(); }
 
-$('f_data').value=new Date().toISOString().slice(0,10);
-// Limpar chaves sensíveis que versões anteriores guardavam no navegador
-try{['ger_adobe_key','ger_region'].forEach(k=>localStorage.removeItem(k));}catch(e){}
 $('f_data').value=new Date().toISOString().slice(0,10);
 const cidSalvo=ls('cid'); if(cidSalvo) $('g_clientid').value=cidSalvo;
 loadExample();
 atualizarSignatarios();
 verificarAutenticacao();  // mostra modal se JWT ausente/expirado
-verificarAdobeSign();     // status é isento de auth — seguro chamar antes do login
+verificarAssinatura();     // status é isento de auth — seguro chamar antes do login
 </script>
 </body>
 </html>

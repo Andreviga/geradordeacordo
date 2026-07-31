@@ -38,13 +38,14 @@ const ROTAS_DOCUMENTO = [
   'baixarPdf',
   'salvarWordDrive',
   'salvarPdfDrive',
-  'enviarAdobeSign',
+  'enviarAssinatura',   // substitui enviarAdobeSign como rota principal
 ];
 
 // Rotas que NÃO precisam chamar podeExportar() (sem exportação de documento)
 const ROTAS_DADOS = [
-  'salvarDrive',   // salva JSON de dados, não documento
-  'saveJson',      // download JSON local
+  'salvarDrive',        // salva JSON de dados, não documento
+  'saveJson',           // download JSON local
+  'enviarAdobeSign',    // stub que delega para enviarAssinatura()
 ];
 
 let passou = 0, falhou = 0;
@@ -71,10 +72,10 @@ for (const fn of ROTAS_DADOS) {
     console.log(`  – ${fn}() não encontrada (pode ter sido renomeada)`);
     continue;
   }
-  assert(
-    `${fn}() não bloqueia exportação de dados`,
-    !corpo.includes('podeExportar()')
-  );
+  const desc = fn === 'enviarAdobeSign'
+    ? `${fn}() é stub que delega para enviarAssinatura() (não chama diretamente)`
+    : `${fn}() não bloqueia exportação de dados`;
+  assert(desc, !corpo.includes('podeExportar()'));
 }
 
 console.log(`\n${'─'.repeat(52)}`);
