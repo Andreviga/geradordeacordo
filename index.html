@@ -1267,38 +1267,6 @@ async function enviarAdobeSign(){
     toast('Erro Adobe Sign: '+e.message);
   }
 }
-  devedores.forEach((_,i)=>{
-    const nome=($('asn_nome'+i)||{}).value||'';
-    const email=($('asn_email'+i)||{}).value||'';
-    if(email.includes('@')) signers.push({name:nome||email,email,order:i+1});
-  });
-  if(!signers.length) return toast('Informe ao menos um e-mail de signatário na seção 11.');
-  $('adobe_status').innerHTML='Enviando documento para o Adobe Acrobat Sign…';
-  $('adobe_result').style.display='none';
-  try{
-    const upResp=await fetch('/api/adobe-sign',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'upload',key,region:val('adobe_region'),
-        filename:nomeArquivo('html'),content:wordHtml(),mimeType:'text/html'})});
-    const upData=await upResp.json();
-    if(!upResp.ok) throw new Error(upData.code||upData.message||upData.error||'Falha no upload ('+upResp.status+')');
-    const agResp=await fetch('/api/adobe-sign',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'createAgreement',key,region:val('adobe_region'),
-        transientDocumentId:upData.transientDocumentId,
-        name:val('f_titulo')||'Termo de Confissão de Dívida',
-        message:val('adobe_msg'),signers})});
-    const agData=await agResp.json();
-    if(!agResp.ok) throw new Error(agData.code||agData.message||agData.error||'Falha ao criar acordo ('+agResp.status+')');
-    $('adobe_status').innerHTML=`<b style="color:var(--seal)">✓ Enviado!</b> ID do acordo: <code>${agData.id}</code>`;
-    $('adobe_result').style.display='';
-    $('adobe_result').innerHTML=`<div class="calc">Acordo criado no Adobe Acrobat Sign.<br><b>ID:</b> <code>${agData.id}</code><br>Os signatários receberão um e-mail com o link para assinar eletronicamente.</div>`;
-    toast('Documento enviado para assinatura digital!');
-  }catch(e){
-    $('adobe_status').innerHTML='<span style="color:var(--alert)">Erro: '+esc(e.message)+'</span>';
-    toast('Erro Adobe Sign: '+e.message);
-  }
-}
 
 // Verifica se Adobe Acrobat Sign está configurado no servidor
 async function verificarAdobeSign(){
