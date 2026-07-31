@@ -1015,11 +1015,8 @@ function validarExportacao(){
       erros.push('Credoras: soma '+money(somaCredCts/100)+' ≠ total '+money(totalCts/100)+' — corrija na seção 01.');
   }
 
-  // Tokens: validar sobre o HTML final exportado (artefato real)
-  const html=wordHtml();
-  const T=tokens();
   // Tokens: validar sobre o HTML final exportado.
-  // wordHtml() agora aplica subst() em cabecalho, rodapé e título (C1) —
+  // wordHtml() aplica subst() em cabeçalho, rodapé e título (C1) —
   // a validação cobre todos os caminhos de exportação.
   const html=wordHtml();
   const T=tokens();
