@@ -13,6 +13,7 @@
 //                     Se vazia, a verificação de origem é desabilitada (útil em dev).
 
 'use strict';
+const { verificarRequisicao } = require('./_auth');
 
 // ── Rate limiting simples em memória ─────────────────────────────────────
 const rateLimits = new Map();
@@ -88,15 +89,9 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  // Camada 1: Verificar token de acesso compartilhado (APP_ACCESS_TOKEN).
-  // Quando APP_ACCESS_TOKEN não está configurado no servidor, o check é pulado (dev local).
-  const APP_TOKEN_REQUIRED = process.env.APP_ACCESS_TOKEN;
-  if (APP_TOKEN_REQUIRED) {
-    const provided = req.headers['x-app-token'] || '';
-    if (provided !== APP_TOKEN_REQUIRED) {
-      return res.status(401).json({ error: 'Token de acesso ausente ou inválido (X-App-Token).' });
-    }
-  }
+  // JWT obrigatório para todas as ações autenticadas
+  const usuario = verificarRequisicao(req, res);
+  if (!usuario) return;
 
   // Camada 2: Verificar origem (ALLOWED_ORIGIN). Header é falsificável por
   // clientes não-browser, por isso é camada adicional, não única.
