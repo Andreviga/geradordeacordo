@@ -266,8 +266,8 @@ input[type=range]{width:100%;accent-color:var(--seal)}
     <div class="body">
       <p class="hint">Estes valores alimentam os tokens usados nas cláusulas.</p>
       <div class="row r3">
-        <div><label>Multa moratória %</label><input type="number" step="0.01" id="e_multamora" value="2"></div>
-        <div><label>Juros de mora % a.m.</label><input type="number" step="0.01" id="e_juros" value="1"></div>
+        <div><label>Multa moratória %<small>Limite CDC: 2% (art. 52, §1º)</small></label><input type="number" step="0.01" id="e_multamora" value="2"></div>
+        <div><label>Juros de mora % a.m.<small>Limite CDC: 1% a.m.</small></label><input type="number" step="0.01" id="e_juros" value="1"></div>
         <div><label>Multa penal %</label><input type="number" step="0.01" id="e_multapenal" value="20"></div>
       </div>
       <div class="row r3">
@@ -277,6 +277,7 @@ input[type=range]{width:100%;accent-color:var(--seal)}
         </div>
         <div><label>Tolerância (dias)</label><input type="number" min="0" id="e_tolerancia" value="0"></div>
       </div>
+      <div id="avisos_percentuais" class="calc warn" style="display:none;font-size:12px"></div>
     </div>
   </details>
 
@@ -1105,6 +1106,23 @@ function render(){
     if(demoAtivo){
       const itCts=itens.reduce((s,i)=>s+strToCents(i.valor),0);
       dTotalEl.value=((itCts+inputCents('d_encargos')-inputCents('d_desconto'))/100).toFixed(2);
+    }
+  }
+
+  // P1.1 — Alertas de limites legais (não bloqueantes — informativos)
+  {
+    const avP=$('avisos_percentuais');
+    if(avP){
+      const mora=num('e_multamora'),jrs=num('e_juros'),penal=num('e_multapenal');
+      const msgs=[];
+      if(mora>2)
+        msgs.push('⚠ Multa moratória acima de 2%: a relação escola/família é de consumo (art. 52, §1º, CDC). Recomenda-se reduzir para 2%.');
+      if(jrs>1)
+        msgs.push('⚠ Juros de mora acima de 1% a.m.: limite para relações de consumo é 1% a.m. (art. 52, §1º, CDC).');
+      if(mora>0&&penal>0)
+        msgs.push('⚠ Multa moratória e multa penal ambas > 0: risco de cumulação indevida — avalie com a assessoria jurídica.');
+      avP.innerHTML=msgs.join('<br>');
+      avP.style.display=msgs.length?'':'none';
     }
   }
 
