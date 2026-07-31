@@ -1132,6 +1132,24 @@ function validarExportacao(){
       erros.push('Credoras: soma '+money(somaCredCts/100)+' ≠ total '+money(totalCts/100)+' — corrija na seção 01.');
   }
 
+  // P1.5 — Validação de ordem das datas
+  {
+    const dAssin  = (!chk('op_datavazia')&&val('f_data')) ? parseDate(val('f_data')) : null;
+    const temEntr = inputCents('p_entrada')>0;
+    const dEntr   = (temEntr&&val('p_entradadata')) ? parseDate(val('p_entradadata')) : null;
+    const dParc   = val('p_data1') ? parseDate(val('p_data1')) : null;
+    if(temEntr&&!dEntr)
+      avisos.push('Há entrada cadastrada sem data de vencimento — preencha na seção 05.');
+    if(dParc){
+      if(dEntr&&dEntr>dParc)
+        erros.push('Vencimento da entrada ('+fmtDate(dEntr)+') é posterior à 1ª parcela ('+fmtDate(dParc)+'). Corrija na seção 05.');
+      if(dAssin&&dEntr&&dAssin>dEntr)
+        avisos.push('Data de assinatura ('+fmtDate(dAssin)+') é posterior ao vencimento da entrada ('+fmtDate(dEntr)+'). Verifique.');
+      else if(dAssin&&!dEntr&&dAssin>dParc)
+        avisos.push('Data de assinatura ('+fmtDate(dAssin)+') é posterior à 1ª parcela ('+fmtDate(dParc)+'). Verifique.');
+    }
+  }
+
   // Tokens: validar sobre o HTML final exportado.
   // wordHtml() aplica subst() em cabeçalho, rodapé e título (C1) —
   // a validação cobre todos os caminhos de exportação.
