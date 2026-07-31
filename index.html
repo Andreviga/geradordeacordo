@@ -680,6 +680,17 @@ function resetClausulas(){
 }
 
 /* ================= parcelamento ================= */
+// Guard: dispara erro explícito se _planoAtual não foi inicializado.
+// No fluxo correto (render() → buildDoc() → blocos) nunca dispara.
+// Se disparar em produção, é sinal de bug de ciclo de render.
+function _planoRequerido(ctx){
+  if(!_planoAtual){
+    const msg='[bug] _planoAtual é null em '+ctx+'() — render() não foi chamado primeiro.';
+    console.error(msg);
+    throw new Error(msg);
+  }
+  return _planoAtual;
+}
 // Wrapper DOM: lê inputs e delega ao calcPlano() puro; adiciona floats para renderização.
 function plano(){
   const res=calcPlano(
@@ -707,13 +718,13 @@ function vencimentos(p){
 
 /* ================= blocos ================= */
 function listaParcelasHtml(){
-  const p=_planoAtual||plano();
+  const p=_planoRequerido('listaParcelasHtml');
   if(p.iguais) return `<p>${bold(`**${p.n} (${extF(p.n)}) parcelas** de **${money(p.parcela)}** (${extValor(p.parcela)}) cada uma.`)}</p>`;
   return `<p class="bul">${bold(`• **${p.n-1} (${extF(p.n-1)}) parcelas** no valor de **${money(p.parcela)}** (${extValor(p.parcela)}) cada uma;`)}</p>`
        + `<p class="bul">${bold(`• **01 (uma) parcela final** no valor de **${money(p.ultima)}** (${extValor(p.ultima)}).`)}</p>`;
 }
 function tabelaParcelasHtml(){
-  const p=_planoAtual||plano(), v=vencimentos(p); if(!v.length) return '';
+  const p=_planoRequerido('tabelaParcelasHtml'), v=vencimentos(p); if(!v.length) return '';
   const metade=Math.ceil(v.length/2);
   let linhas='';
   for(let i=0;i<metade;i++){
@@ -725,10 +736,10 @@ function tabelaParcelasHtml(){
 }
 function demonstrativoHtml(){
   if(!itens.length) return '';
-  const tot=itens.reduce((s,i)=>s+(parseFloat(i.valor)||0),0);
+  const totCts=itens.reduce((s,i)=>s+strToCents(i.valor),0);
   return `<table><thead><tr><th>Nº</th><th>Descrição</th><th>Vencimento</th><th>Valor</th></tr></thead><tbody>`
-    + itens.map((it,i)=>`<tr><td class="n">${i+1}</td><td>${esc(it.desc)}</td><td class="n">${fmtDate(parseDate(it.venc))}</td><td class="v">${money(parseFloat(it.valor)||0)}</td></tr>`).join('')
-    + `<tr><td class="n" colspan="3"><b>Total</b></td><td class="v"><b>${money(tot)}</b></td></tr></tbody></table>`;
+    + itens.map((it,i)=>`<tr><td class="n">${i+1}</td><td>${esc(it.desc)}</td><td class="n">${fmtDate(parseDate(it.venc))}</td><td class="v">${money(strToCents(it.valor)/100)}</td></tr>`).join('')
+    + `<tr><td class="n" colspan="3"><b>Total</b></td><td class="v"><b>${money(totCts/100)}</b></td></tr></tbody></table>`;
 }
 function divisaoHtml(){
   const cv=credoras.filter(c=>parseFloat(c.valor)>0);
@@ -1115,14 +1126,19 @@ async function gApi(url,opts){
   }
   opts=opts||{}; opts.headers=Object.assign({Authorization:'Bearer '+gToken},opts.headers||{});
   const r=await fetch(url,opts);
-  if(r.status===401){
-    gToken=null; gTokenExpiry=null;
-    statusDrive('Sessão expirada. Clique em Conectar para renovar.','expirado');
-    throw new Error('Sessão expirada. Clique em Conectar para renovar.');
+  // Tenta ler o corpo JSON do erro para incluir na mensagem
+  if(!r.ok){
+    let detalhe='';
+    try{ const b=await r.clone().json(); detalhe=b.error?.message||b.message||b.error||''; }catch(_){}
+    if(r.status===401){
+      gToken=null; gTokenExpiry=null;
+      statusDrive('Sessão expirada. Clique em Conectar para renovar.','expirado');
+      throw new Error('Sessão expirada. Clique em Conectar para renovar.');
+    }
+    if(r.status===403) throw new Error('Permissão negada pelo Google Drive'+(detalhe?' — '+detalhe:' (HTTP 403).'));
+    if(r.status===404) throw new Error('Arquivo ou pasta não encontrado no Drive'+(detalhe?' — '+detalhe:' (HTTP 404).'));
+    throw new Error('Erro HTTP '+r.status+' ao acessar o Google Drive'+(detalhe?' — '+detalhe:'.'));
   }
-  if(r.status===403) throw new Error('Permissão negada pelo Google Drive (HTTP 403).');
-  if(r.status===404) throw new Error('Arquivo ou pasta não encontrado no Drive (HTTP 404).');
-  if(!r.ok) throw new Error('Erro HTTP '+r.status+' ao acessar o Google Drive.');
   return r;
 }
 async function pastaDrive(){
