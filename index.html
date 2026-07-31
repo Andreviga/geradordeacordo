@@ -953,6 +953,8 @@ function tokens(){
   const p=_planoAtual||plano(), v=vencimentos(p), multi=credoras.length>1, md=devedores.length>1;
   const ult=v.length?v[v.length-1].data:null;
   const d1=parseDate(val('p_data1'));
+  // P1.2: helper que combina valor numérico e extenso — R$ X,XX (por extenso)
+  const moneyExt=x=>x>0?money(x)+' ('+extValor(x)+')':money(x);
   return {
     DEV: md?'DEVEDORES':'DEVEDOR(A)',
     CRED: multi?'CREDORAS':'CREDORA',
@@ -963,6 +965,11 @@ function tokens(){
     elaCred: multi?'estas':'esta',
     credora: credoras.map(c=>c.nome).join(' e '),
     total: money(p.total), totalExt: extValor(p.total),
+    // P1.2 — tokens combinados (R$ X,XX (por extenso))
+    valorTotalExtenso:    moneyExt(p.total),
+    valorOriginalExtenso: moneyExt(inputCents('d_original')/100),
+    entradaExtenso:       p.entrada>0?moneyExt(p.entrada):'',
+    valorParcelaExtenso:  moneyExt(p.parcela),
     entrada: money(p.entrada),
     entradaFrase: p.entrada>0 ? `, mediante entrada de ${money(p.entrada)} (${extValor(p.entrada)}) com vencimento em ${fmtDate(parseDate(val('p_entradadata')))||'[data]'}, e o saldo` : '',
     origem: val('d_origem')||'obrigações inadimplidas',
@@ -1560,7 +1567,7 @@ function loadExample(){
 }
 $('lib').innerHTML = CATALOGO.map(c=>`<option value="${c.id}">${c.titulo}</option>`).join('');
 $('tokenList').innerHTML = 'Tokens (clique para copiar): '
-  + ['{{total}}','{{totalExt}}','{{nParcelas}}','{{nParcelasExt}}','{{valorParcela}}','{{valorUltima}}','{{data1Ext}}','{{ultimoVencExt}}','{{meio}}','{{multaMora}}','{{juros}}','{{multaPenal}}','{{multaPenalExt}}','{{honorarios}}','{{indice}}','{{foro}}','{{DEV}}','{{CRED}}','{{daCred}}','{{pelaCred}}','{{origem}}','{{listaParcelas}}','{{tabelaParcelas}}','{{demonstrativo}}','{{divisaoCredito}}','{{ref:reconhecimento}}']
+  + ['{{total}}','{{totalExt}}','{{valorTotalExtenso}}','{{valorOriginalExtenso}}','{{entradaExtenso}}','{{valorParcelaExtenso}}','{{nParcelas}}','{{nParcelasExt}}','{{valorParcela}}','{{valorUltima}}','{{data1Ext}}','{{ultimoVencExt}}','{{meio}}','{{multaMora}}','{{juros}}','{{multaPenal}}','{{multaPenalExt}}','{{honorarios}}','{{indice}}','{{foro}}','{{DEV}}','{{CRED}}','{{daCred}}','{{pelaCred}}','{{origem}}','{{listaParcelas}}','{{tabelaParcelas}}','{{demonstrativo}}','{{divisaoCredito}}','{{ref:reconhecimento}}']
     .map(t=>`<code onclick="navigator.clipboard&&navigator.clipboard.writeText('${t}');toast('${t} copiado')">${t}</code>`).join(' ');
 /* ================= PDF (html2pdf.js) ================= */
 async function baixarPdf(){
