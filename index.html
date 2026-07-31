@@ -313,6 +313,12 @@ input[type=range]{width:100%;accent-color:var(--seal)}
         <div><label>Data da assinatura</label><input type="date" id="f_data"></div>
       </div>
       <div class="check"><input type="checkbox" id="op_datavazia" checked><span>Deixar a data em branco para preenchimento à mão</span></div>
+      <div class="check">
+        <input type="checkbox" id="op_assinatura_eletronica">
+        <span>Modo eletrônico — dispensa testemunhas (art. 784, §4º, CPC)
+          <small>Lei 14.620/2023: documento assinado eletronicamente com verificação de integridade dispensa as testemunhas instrumentais. O fecho do documento muda automaticamente.</small></span>
+      </div>
+      <p id="aviso_testemunhas" class="hint" style="display:none">Testemunhas opcionais no modo eletrônico. Preencha-as se quiser reforço probatório adicional; caso contrário, deixe em branco.</p>
       <div class="row r2">
         <div><label>Testemunha 1 — nome</label><input type="text" id="t1_nome"></div>
         <div><label>CPF</label><input type="text" id="t1_cpf"></div>
@@ -618,7 +624,7 @@ const CAMPOS_FORMULARIO=new Set([
   // Seção 10 — Google Drive
   'g_clientid',
   // Seção 11 — Assinatura
-  'ass_msg','op_whatsapp'
+  'ass_msg','op_whatsapp','op_assinatura_eletronica'
 ]);
 
 /* ---------- listas dinâmicas ---------- */
@@ -924,16 +930,36 @@ function buildDoc(){
   });
 
   const vias=Math.max(1,Math.floor(num('f_vias'))||2);
-  h+=`<p style="margin-top:14px">E, por estarem assim justos e acordados, assinam o presente instrumento em ${String(vias).padStart(2,'0')} (${extF(vias)}) vias de igual teor e forma, na presença de 02 (duas) testemunhas.</p>`;
+  const modoElet=chk('op_assinatura_eletronica');
+  if(modoElet){
+    // Fecho eletrônico (art. 784, §4º, CPC — Lei 14.620/2023)
+    h+=`<p style="margin-top:14px">E, por estarem assim justos e contratados, firmam as partes o presente instrumento por assinatura eletrônica, cuja autoria e integridade podem ser verificadas no relatório de assinaturas que o integra, dispensada a presença de testemunhas na forma do art. 784, §4º, do Código de Processo Civil.</p>`;
+  }else{
+    // Fecho físico padrão
+    h+=`<p style="margin-top:14px">E, por estarem assim justos e acordados, assinam o presente instrumento em ${String(vias).padStart(2,'0')} (${extF(vias)}) vias de igual teor e forma, na presença de 02 (duas) testemunhas.</p>`;
+  }
   const fd=parseDate(val('f_data'));
   h+=`<p style="text-align:center;margin-top:22px">${esc(val('f_local'))}, ${(!chk('op_datavazia')&&fd)?extDate(fd):'______ de __________________ de '+(fd?fd.getFullYear():new Date().getFullYear())}.</p>`;
 
   const sign=(nome,papel,ancora)=>`<div class="sign">${ancora?`<span class="sign-anchor">${esc(ancora)}</span>`:''}<div class="line"></div><div class="who">${esc(nome)}</div><div class="role">${esc(papel)}</div></div>`;
   credoras.forEach((c,i)=>{ h+=sign(c.nome,'Credora'+(c.rep?' — '+c.rep:''),`<<credora${i+1}>>`); });
   devedores.forEach((d,i)=>{ h+=sign(d.nome,'Devedor(a)'+(md?' Solidário(a)':''),`<<devedor${i+1}}>>`); });
-  h+=`<div class="wit"><p class="lbl">Testemunhas:</p>
-    <p>1. Nome: ${esc(val('t1_nome'))||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(val('t1_cpf'))||'____________________'}</p>
-    <p>2. Nome: ${esc(val('t2_nome'))||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(val('t2_cpf'))||'____________________'}</p></div>`;
+  const t1=val('t1_nome'),t2=val('t2_nome'),c1=val('t1_cpf'),c2=val('t2_cpf');
+  const temTest=t1||t2||c1||c2;
+  if(!modoElet){
+    // Físico: bloco de testemunhas sempre visível (com espaços em branco para escrita manual)
+    h+=`<div class="wit"><p class="lbl">Testemunhas:</p>
+    <p>1. Nome: ${esc(t1)||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(c1)||'____________________'}</p>
+    <p>2. Nome: ${esc(t2)||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(c2)||'____________________'}</p></div>`;
+  }else if(temTest){
+    // Eletrônico com testemunhas preenchidas: exibir (escolha do usuário)
+    h+=`<div class="wit"><p class="lbl">Testemunhas (opcional):</p>
+    <p>1. Nome: ${esc(t1)||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(c1)||'____________________'}</p>
+    <p>2. Nome: ${esc(t2)||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(c2)||'____________________'}</p></div>`;
+  }else{
+    // Eletrônico sem testemunhas: nota de dispensa no documento
+    h+=`<div class="wit" style="font-size:10pt;color:#555"><p>Testemunhas dispensadas na forma do art. 784, §4º, do Código de Processo Civil — documento assinado eletronicamente com verificação de integridade.</p></div>`;
+  }
 
   return marcaHtml()+timbreHtml(T)+`<div class="sheet">${h}</div>`;
 }
@@ -943,6 +969,10 @@ function render(){
   $('wrapQtd').style.display   = val('p_modo')==='qtd'?'':'none';
   $('wrapValor').style.display = val('p_modo')==='qtd'?'none':'';
   $('itensBox').style.display  = chk('op_demonstrativo')?'':'none';
+
+  // ── modo de assinatura — mostrar/ocultar aviso de testemunhas opcionais ──
+  const avTest=$('aviso_testemunhas');
+  if(avTest) avTest.style.display=chk('op_assinatura_eletronica')?'':'none';
 
   // ── credoras ──
   const totalCts=inputCents('d_total');
