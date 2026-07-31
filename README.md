@@ -89,7 +89,51 @@ o mesmo `.json` do computador.
 
 ---
 
-## Observações
+## 4. Configurar Assinatura Digital (Adobe Acrobat Sign)
+
+O endpoint de assinatura vive em `/api/adobe-sign` e precisa das seguintes variáveis de
+ambiente configuradas no painel do Vercel (**Settings → Environment Variables**):
+
+| Variável | Descrição | Onde obter |
+|---|---|---|
+| `ADOBE_SIGN_INTEGRATION_KEY` | Chave de integração da conta Adobe Sign | Adobe Sign → Conta → Adobe Sign API → Integration Key |
+| `ADOBE_SIGN_REGION` | Região da conta (padrão: `na4`) | `na1`/`na2`/`na4`/`eu1`/`eu2`/`au1`/`jp1`/`in1` |
+| `APP_ACCESS_TOKEN` | Segredo compartilhado cliente↔servidor | Gere com `openssl rand -hex 32` |
+| `ALLOWED_ORIGIN` | URL do Vercel sem barra final | ex.: `https://geradordeacordo.vercel.app` |
+| `ASSINATURA_PROVIDER` | Provedor ativo (padrão: `manual`) | `manual` ou `adobe` |
+
+**Após configurar as variáveis no Vercel**, edite o `index.html` e defina a mesma string em:
+
+```js
+const APP_TOKEN = 'cole_aqui_o_mesmo_valor_de_APP_ACCESS_TOKEN';
+```
+
+Para testar localmente, copie `.env.example` para `.env.local` (não commitado), preencha os
+valores e use `vercel dev`.
+
+### Segurança do endpoint
+
+O `/api/adobe-sign` usa duas camadas de proteção:
+
+1. **`APP_ACCESS_TOKEN`** — header `X-App-Token` exigido em toda requisição. É o controle de
+   acesso real; sem ele, qualquer `curl` externo recebe `401`. Quando a variável não está
+   configurada (ambiente de dev), o check é pulado.
+
+2. **`ALLOWED_ORIGIN`** — verifica o header `Origin`/`Referer`. É camada adicional, *não*
+   única, pois headers são escolhidos pelo cliente e podem ser falsificados por scripts
+   não-browser.
+
+### Rate limit (best-effort)
+
+O endpoint limita a 10 requisições por minuto por IP. Este limite é **por instância** do
+servidor Vercel — em ambientes com múltiplas instâncias paralelas, o limite real é
+10 × número de instâncias ativas. O controle de acesso real é o `APP_ACCESS_TOKEN`; o
+rate limit é apenas amortecedor contra repetição acidental ou abuso básico. Para limite
+global garantido, seria necessário migrar o contador para um KV externo (ex.: Vercel KV).
+
+---
+
+## 5. Observações
 
 - Cabeçalho, rodapé e marca d'água estão embutidos no `index.html` em base64: não existe
   pasta de imagens para quebrar.
@@ -99,3 +143,7 @@ o mesmo `.json` do computador.
   todas as páginas. No Word, salve como `.docx` para editar com conforto.
 - Os textos das cláusulas usam tokens (`{{total}}`, `{{multaPenal}}`, `{{ref:mora}}`…) que se
   atualizam sozinhos quando você muda os campos ou a ordem das cláusulas.
+
+> ⚠️ **Revisão jurídica obrigatória.** Todo o texto gerado pelo app — cláusulas,
+> fecho e eleição de foro — deve ser revisado pela assessoria jurídica do colégio
+> antes de entrar em uso em produção.
