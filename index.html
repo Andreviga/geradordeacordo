@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gerador de Termo de Confissão de Dívida — Colégio Raízes</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
 :root{
   --bg:#e9ecf1; --surface:#fff; --ink:#12203a; --ink-2:#48566f;
@@ -139,6 +140,7 @@ input[type=range]{width:100%;accent-color:var(--seal)}
   <button class="btn ghost small" onclick="document.getElementById('imp').click()">Abrir dados</button>
   <input type="file" id="imp" accept=".json" style="display:none" onchange="loadJson(this)">
   <button class="btn" onclick="exportWord()">Baixar Word</button>
+  <button class="btn" onclick="baixarPdf()">Baixar PDF</button>
   <button class="btn primary" onclick="printPdf()">Imprimir / PDF</button>
 </header>
 
@@ -303,15 +305,56 @@ input[type=range]{width:100%;accent-color:var(--seal)}
         <div><button type="button" class="btn small" style="width:100%" onclick="conectarDrive()">Conectar</button></div>
         <div><button type="button" class="btn small" style="width:100%" onclick="desconectarDrive()">Desconectar</button></div>
       </div>
-      <div class="row r2">
+      <div class="row r3">
         <div><button type="button" class="btn small" style="width:100%" onclick="salvarDrive()">Salvar acordo no Drive</button></div>
         <div><button type="button" class="btn small" style="width:100%" onclick="salvarWordDrive()">Enviar Word ao Drive</button></div>
+        <div><button type="button" class="btn small" style="width:100%" onclick="salvarPdfDrive()">Salvar PDF no Drive</button></div>
       </div>
       <div class="row r21">
         <div><label>Acordos salvos</label><select id="g_arquivos"><option value="">— atualize a lista —</option></select></div>
         <div style="align-self:end"><button type="button" class="btn small" style="width:100%" onclick="listarDrive()">Atualizar</button></div>
       </div>
       <button type="button" class="btn small" onclick="abrirDrive()">Abrir o selecionado</button>
+    </div>
+  </details>
+
+  <details class="group" ontoggle="if(this.open) atualizarSignatarios()">
+    <summary><span class="num">11</span> Assinatura Digital (Adobe Acrobat Sign)</summary>
+    <div class="body">
+      <div class="status" id="adobe_status">Não configurado. Informe a Integration Key abaixo.</div>
+      <div class="row">
+        <div><label>Integration Key do Adobe Acrobat Sign</label>
+          <input type="text" id="adobe_key" placeholder="Cole aqui sua Integration Key"></div>
+      </div>
+      <p class="hint">Onde obter: Adobe Acrobat Sign → <b>Conta</b> → <b>Adobe Sign API</b> → <b>Integration Key</b>. Clique em &ldquo;Habilitar acesso à API&rdquo; se necessário.</p>
+      <div class="row r2">
+        <div><label>Região da conta Adobe Sign</label>
+          <select id="adobe_region">
+            <option value="na4">NA4 — Americas (padrão)</option>
+            <option value="na1">NA1 — Americas</option>
+            <option value="na2">NA2 — Americas</option>
+            <option value="eu1">EU1 — Europa</option>
+            <option value="eu2">EU2 — Europa</option>
+            <option value="au1">AU1 — Oceania</option>
+            <option value="jp1">JP1 — Japão</option>
+            <option value="in1">IN1 — Índia</option>
+          </select></div>
+        <div><label>Mensagem para os signatários</label>
+          <input type="text" id="adobe_msg" value="Por favor, assine o Termo de Confissão de Dívida conforme acordado."></div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Signatários (e-mail de cada devedor)</label>
+          <p class="hint">O Adobe Acrobat Sign enviará um link de assinatura por e-mail a cada signatário. Os campos são preenchidos automaticamente com os dados da seção 02.</p>
+          <div id="adobe_signers"></div>
+          <button type="button" class="btn small" onclick="atualizarSignatarios()" style="margin-top:6px">↺ Atualizar da lista de devedores</button>
+        </div>
+      </div>
+      <div class="row r2" style="margin-top:12px">
+        <div><button type="button" class="btn primary small" style="width:100%" onclick="enviarAdobeSign()">✉ Enviar para Assinatura Digital</button></div>
+        <div><button type="button" class="btn small" style="width:100%" onclick="baixarPdf()">⬇ Baixar PDF (assinatura manual)</button></div>
+      </div>
+      <div id="adobe_result" style="display:none;margin-top:10px"></div>
     </div>
   </details>
 </form>
@@ -963,9 +1006,101 @@ $('lib').innerHTML = CATALOGO.map(c=>`<option value="${c.id}">${c.titulo}</optio
 $('tokenList').innerHTML = 'Tokens (clique para copiar): '
   + ['{{total}}','{{totalExt}}','{{nParcelas}}','{{nParcelasExt}}','{{valorParcela}}','{{valorUltima}}','{{data1Ext}}','{{ultimoVencExt}}','{{meio}}','{{multaMora}}','{{juros}}','{{multaPenal}}','{{multaPenalExt}}','{{honorarios}}','{{indice}}','{{foro}}','{{DEV}}','{{CRED}}','{{daCred}}','{{pelaCred}}','{{origem}}','{{listaParcelas}}','{{tabelaParcelas}}','{{demonstrativo}}','{{divisaoCredito}}','{{ref:reconhecimento}}']
     .map(t=>`<code onclick="navigator.clipboard&&navigator.clipboard.writeText('${t}');toast('${t} copiado')">${t}</code>`).join(' ');
+/* ================= PDF (html2pdf.js) ================= */
+async function baixarPdf(){
+  toast('Gerando PDF…');
+  try{
+    await html2pdf().set({
+      margin:0, filename:nomeArquivo('pdf'),
+      image:{type:'jpeg',quality:0.98},
+      html2canvas:{scale:2,useCORS:true,letterRendering:true,scrollY:0},
+      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
+    }).from($('doc')).save();
+    toast('PDF gerado! Dica: use Imprimir/PDF para cabeçalho em todas as páginas.');
+  }catch(e){ toast('Erro ao gerar PDF: '+e.message); }
+}
+async function salvarPdfDrive(){
+  if(!gToken) return toast('Conecte o Google Drive primeiro.');
+  toast('Gerando PDF para o Drive…');
+  try{
+    const blob=await html2pdf().set({
+      margin:0,
+      html2canvas:{scale:2,useCORS:true,scrollY:0},
+      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
+    }).from($('doc')).output('blob');
+    const nome=nomeArquivo('pdf');
+    const fid=await pastaDrive();
+    const form=new FormData();
+    form.append('metadata',new Blob([JSON.stringify({name:nome,parents:[fid]})],{type:'application/json'}));
+    form.append('file',blob,nome);
+    const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',
+      {method:'POST',headers:{Authorization:'Bearer '+gToken},body:form});
+    if(r.status===401){gToken=null;statusDrive('Sessão expirada — conecte novamente.');throw new Error('401');}
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    toast('PDF salvo no Drive: '+j.name);
+    listarDrive();
+  }catch(e){ toast('Não foi possível salvar PDF: '+e.message); }
+}
+
+/* ================= Adobe Acrobat Sign ================= */
+function atualizarSignatarios(){
+  const box=$('adobe_signers');
+  if(!devedores.length){
+    box.innerHTML='<p class="hint">Adicione devedores na seção 02 para preencher automaticamente.</p>';
+    return;
+  }
+  // Preserva e-mails já digitados
+  const emails=devedores.map((_,i)=>{ const el=$('asn_email'+i); return el?el.value:''; });
+  box.innerHTML=devedores.map((d,i)=>
+    `<div class="card" style="padding:8px 10px;margin-bottom:6px">
+  <div class="row r2">
+    <div><label>Nome do signatário ${i+1}</label><input type="text" id="asn_nome${i}" value="${esc(d.nome)}"></div>
+    <div><label>E-mail</label><input type="email" id="asn_email${i}" value="${esc(emails[i]||(d.contato&&d.contato.includes('@')?d.contato:''))}"></div>
+  </div>
+</div>`).join('');
+}
+async function enviarAdobeSign(){
+  const key=val('adobe_key');
+  if(!key) return toast('Informe a Integration Key do Adobe Acrobat Sign.');
+  const signers=[];
+  devedores.forEach((_,i)=>{
+    const nome=($('asn_nome'+i)||{}).value||'';
+    const email=($('asn_email'+i)||{}).value||'';
+    if(email.includes('@')) signers.push({name:nome||email,email,order:i+1});
+  });
+  if(!signers.length) return toast('Informe ao menos um e-mail de signatário na seção 11.');
+  $('adobe_status').innerHTML='Enviando documento para o Adobe Acrobat Sign…';
+  $('adobe_result').style.display='none';
+  try{
+    const upResp=await fetch('/api/adobe-sign',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'upload',key,region:val('adobe_region'),
+        filename:nomeArquivo('html'),content:wordHtml(),mimeType:'text/html'})});
+    const upData=await upResp.json();
+    if(!upResp.ok) throw new Error(upData.code||upData.message||upData.error||'Falha no upload ('+upResp.status+')');
+    const agResp=await fetch('/api/adobe-sign',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'createAgreement',key,region:val('adobe_region'),
+        transientDocumentId:upData.transientDocumentId,
+        name:val('f_titulo')||'Termo de Confissão de Dívida',
+        message:val('adobe_msg'),signers})});
+    const agData=await agResp.json();
+    if(!agResp.ok) throw new Error(agData.code||agData.message||agData.error||'Falha ao criar acordo ('+agResp.status+')');
+    $('adobe_status').innerHTML=`<b style="color:var(--seal)">✓ Enviado!</b> ID do acordo: <code>${agData.id}</code>`;
+    $('adobe_result').style.display='';
+    $('adobe_result').innerHTML=`<div class="calc">Acordo criado no Adobe Acrobat Sign.<br><b>ID:</b> <code>${agData.id}</code><br>Os signatários receberão um e-mail com o link para assinar eletronicamente.</div>`;
+    toast('Documento enviado para assinatura digital!');
+  }catch(e){
+    $('adobe_status').innerHTML='<span style="color:var(--alert)">Erro: '+esc(e.message)+'</span>';
+    toast('Erro Adobe Sign: '+e.message);
+  }
+}
+
 $('f_data').value=new Date().toISOString().slice(0,10);
 const cidSalvo=ls('cid'); if(cidSalvo) $('g_clientid').value=cidSalvo;
 loadExample();
+atualizarSignatarios();
 </script>
 </body>
 </html>
