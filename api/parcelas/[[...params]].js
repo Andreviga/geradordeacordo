@@ -26,8 +26,13 @@ module.exports = async (req, res) => {
   if (!user) return;
 
   // ── Roteamento ────────────────────────────────────────────────────────────
-  const params = Array.isArray(req.query.params) ? req.query.params
+  let params = Array.isArray(req.query.params) ? req.query.params
     : req.query.params ? [req.query.params] : [];
+  // Fallback: extrair segmentos da URL quando Vercel não preenche req.query.params
+  if (params.length === 0 && req.url) {
+    const after = (req.url || '').split('?')[0].replace(/^\/api\/parcelas\/?/, '');
+    if (after) params = after.split('/').filter(Boolean);
+  }
   const [seg0, seg1, ...rest] = params;
 
   if (rest.length > 0) return res.status(404).json({ erro: 'Rota não encontrada' });

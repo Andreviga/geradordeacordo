@@ -30,8 +30,14 @@ module.exports = async (req, res) => {
   if (!user) return;
 
   // ── Roteamento ────────────────────────────────────────────────────────────
-  const params = Array.isArray(req.query.params) ? req.query.params
+  let params = Array.isArray(req.query.params) ? req.query.params
     : req.query.params ? [req.query.params] : [];
+  // Fallback: extrair segmentos da URL quando Vercel não preenche req.query.params
+  if (params.length === 0 && req.url) {
+    const urlPath = (req.url || '').split('?')[0];
+    const after = urlPath.replace(/^\/api\/acordos\/?/, '');
+    if (after) params = after.split('/').filter(Boolean);
+  }
   const [seg0, seg1, ...rest] = params;
 
   // Caminho com mais de 2 segmentos → 404
