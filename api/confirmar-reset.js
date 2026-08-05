@@ -4,15 +4,19 @@ const bcrypt  = require('bcryptjs');
 const { Pool } = require('pg');
 const { criarJWT } = require('./_auth');
 
+// Parseia DATABASE_URL — suporta "psql 'postgresql://...'" ou URL direta
 function conectar() {
-  const url = process.env.DATABASE_URL;
-  if (!url) return null;
+  var raw = process.env.DATABASE_URL || '';
+  if (!raw) return null;
+  var url = raw.trim();
+  var m = url.match(/psql\s+['"]?(postgresql:\/\/.+?)['"]?\s*$/i);
+  if (m) url = m[1]; // extrai URL do wrapper psql
   try {
     const u = new URL(url);
-    u.searchParams.delete('sslmode');
-    u.searchParams.delete('channel_binding');
-    return new Pool({ connectionString: u.toString(), ssl: { rejectUnauthorized: false }, max: 2 });
-  } catch { return new Pool({ connectionString: url, ssl: { rejectUnauthorized: false }, max: 2 }); }
+    return new Pool({ host: u.hostname, port: parseInt(u.port||'5432',10),
+      user: decodeURIComponent(u.username), password: decodeURIComponent(u.password),
+      database: u.pathname.replace(/^\//,''), ssl:{rejectUnauthorized:false}, max:2 });
+  } catch { return new Pool({ connectionString: url, ssl:{rejectUnauthorized:false}, max:2 }); }
 }
 
 module.exports = async (req, res) => {

@@ -3,11 +3,14 @@ const crypto  = require('crypto');
 const { Pool } = require('pg');
 const { criarJWT } = require('./_auth');
 
-// Parseia DATABASE_URL para parametros individuais que sobrescrevem env vars PG*
+// Parseia DATABASE_URL — suporta "psql 'postgresql://...'" ou URL direta
 function parseDbUrl(raw) {
   if (!raw) return null;
+  var url = raw.trim();
+  var m = url.match(/psql\s+['"]?(postgresql:\/\/.+?)['"]?\s*$/i);
+  if (m) url = m[1]; // extrai URL do wrapper psql
   try {
-    const u = new URL(raw);
+    const u = new URL(url);
     return {
       host:     u.hostname,
       port:     parseInt(u.port || '5432', 10),

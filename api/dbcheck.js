@@ -1,1 +1,0 @@
-module.exports=(req,res)=>{const u=process.env.DATABASE_URL||'';const h=u.split('@')[1]||'';let ok=false;try{new URL(u);ok=true;}catch(_){}res.json({host:h.split('/')[0]||'(none)',len:u.length,urlOk:ok,proto:u.split(':')[0]||'(empty)'});}
