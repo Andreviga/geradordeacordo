@@ -4,6 +4,7 @@
 //
 // Actions:
 //   status    — retorna provedor ativo e recursos; isento de JWT e CORS (para verificação na carga)
+//   pendencias — lista falhas permanentes no webhook; requer JWT
 //   enviar    — envia documento para assinatura; requer JWT
 //   consultar — consulta status de documento; requer JWT
 //
@@ -12,8 +13,9 @@
 
 'use strict';
 
-const { verificarRequisicao } = require('../_auth');
+const { verificarRequisicao, verificarRequisicaoComBanco, applyCors } = require('../_auth');
 const { validarSignatarios, validarPDF, erroNormalizado, gerarExternalId } = require('./_contrato');
+const _drive = require('./_drive'); // acesso via objeto (não desestruturado) para permitir mock nos testes
 
 // Rate limiting compartilhado
 const rateLimits = new Map();
@@ -31,6 +33,9 @@ function checkOrigin(req) {
   if (!allowed.length) return true;
   const o = req.headers['origin'] || '';
   const r = req.headers['referer'] || '';
+  // Sem header Origin/Referer = cliente não-browser (API, mobile, testes) = não é CSRF = permitir.
+  // Origin só existe em requisições cross-origin de browsers; JWT já garante a autenticação.
+  if (!o && !r) return true;
   return allowed.some(a => o.startsWith(a) || r.startsWith(a));
 }
 
@@ -46,7 +51,7 @@ function getProvider() {
 }
 
 module.exports = async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  applyCors(req, res);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
@@ -72,10 +77,18 @@ module.exports = async function handler(req, res) {
       },
     });
   }
-
-  // ── Verificação de origem e JWT para ações autenticadas ──────────────────
+  // ── action: pendencias — lista falhas permanentes para a secretaria (requer JWT + banco) ──
+  if (action === 'pendencias') {
+    const usuario = await verificarRequisicaoComBanco(req, res);
+    if (!usuario) return;
+    if (!checkOrigin(req)) return res.status(403).json({ error: 'Origem não autorizada.' });
+    const dados = await _drive.lerPendencias();
+    return res.status(200).json(dados || {});
+  }
+  // ── JWT + banco para ações autenticadas, depois verificação de origem ──────
+  const usuario = await verificarRequisicaoComBanco(req, res);
+  if (!usuario) return;
   if (!checkOrigin(req)) return res.status(403).json({ error: 'Origem não autorizada.' });
-  const usuario = verificarRequisicao(req, res);
   if (!usuario) return;
 
   const { name, provider } = getProvider();

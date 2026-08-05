@@ -28,9 +28,10 @@ function extrairIdsDoHTML() {
 // IDs no DOM que intencionalmente NÃO fazem parte dos dados persistidos
 const EXCLUIDOS = new Set([
   'imp',          // input[type=file] oculto para carregar JSON
-  'g_arquivos',   // select de lista de arquivos do Drive (UI, não dado)
+  'g_arquivos',   // select de lista de arquivos do Drive (UI, não dado) — seção 10 removida
   'lib',          // select de biblioteca de cláusulas (UI, não dado)
   'loginSenha',   // input[type=password] do modal de login (jamais persistido)
+  'loginEmail',   // input[type=email] do modal de login (jamais persistido)
 ]);
 
 const campos = extrairCamposFormulario();

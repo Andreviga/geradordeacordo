@@ -4,3 +4,10 @@
 node_modules/
 test-results/
 playwright-report/
+
+# Credenciais — nunca commitar; mova para fora da pasta do projeto
+service-account*.json
+*credentials*.json
+zippy-elf-*.json
+*.pem
+*.key

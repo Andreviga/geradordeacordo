@@ -94,4 +94,70 @@ function verificarRequisicao(req, res) {
   return payload;
 }
 
-module.exports = { criarJWT, verificarJWT, verificarRequisicao };
+/**
+ * Variante com verificação de ativo no banco (Fase E).
+ * Rejeita tokens legados (sub='dev') — exige login com DB.
+ * Retorna null e envia 401/503 se inválido.
+ */
+async function verificarRequisicaoComBanco(req, res) {
+  const payload = verificarRequisicao(req, res);
+  if (!payload) return null;
+
+  if (!payload.sub || payload.sub === 'dev') {
+    res.status(401).json({ error: 'Sessão desatualizada. Faça login com e-mail e senha.' });
+    return null;
+  }
+
+  const { getPool } = require('./_db');
+  const pool = getPool();
+  if (!pool) {
+    res.status(503).json({ error: 'Banco indisponível.' });
+    return null;
+  }
+
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, papel, ativo FROM usuarios WHERE id = $1',
+      [payload.sub]
+    );
+    if (!rows[0] || !rows[0].ativo) {
+      res.status(401).json({ error: 'Sessão inválida ou usuário desativado.' });
+      return null;
+    }
+    // papel do banco é autoritativo (não o do JWT, que pode estar desatualizado)
+    return { ...payload, papel: rows[0].papel };
+  } catch {
+    res.status(503).json({ error: 'Banco indisponível.' });
+    return null;
+  }
+}
+
+// Aplica CORS correto: usa ALLOWED_ORIGIN quando configurado.
+// Nunca usa * quando há origem externa — falha de config deve ser visível.
+function applyCors(req, res) {
+  const raw    = (process.env.ALLOWED_ORIGIN || '').trim();
+  const origin = req.headers['origin'] || '';
+
+  if (!raw) {
+    if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+      res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    } else {
+      console.error(
+        '[CORS] AVISO ALTO: ALLOWED_ORIGIN não configurado e origem externa detectada:', origin,
+        '— Configure ALLOWED_ORIGIN no painel do Vercel.'
+      );
+      // Não envia header CORS → browser bloqueia a requisição (comportamento correto)
+    }
+    return;
+  }
+
+  const allowed = raw.split(',').map(s => s.trim()).filter(Boolean);
+  const matched = allowed.find(a => origin.startsWith(a));
+  if (matched) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  // Origem não coincide → sem header → browser bloqueia (não usar primeiro allowed como fallback)
+}
+
+module.exports = { criarJWT, verificarJWT, verificarRequisicao, verificarRequisicaoComBanco, applyCors };

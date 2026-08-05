@@ -134,6 +134,23 @@ grupo('[12] {{foro}} e {{DEV}} no cabeçalho simulado — não bloqueiam');
   assert('nenhum erro', r.erros.length === 0);
 }
 
+// ── [P1.8] Estrutura de erros de validarExportacao ────────────────────────
+grupo('[P1.8] Erros de validação carregam {msg, secao, campo} — não strings brutas');
+{
+  // Simula a verificação estrutural lendo o código-fonte do index.html
+  const htmlSrc = require('fs').readFileSync(require('path').join(__dirname, '../index.html'), 'utf8');
+  // Cada erros.push dentro de validarExportacao deve passar um objeto {msg,...}
+  // A presença de `e(` (helper) ou `a(` como primeiros argumentos confirma
+  const veStart = htmlSrc.indexOf('function validarExportacao(){');
+  const veEnd   = htmlSrc.indexOf('return{erros,avisos,html};', veStart);
+  const veBody  = htmlSrc.substring(veStart, veEnd);
+  // Não deve haver erros.push('string literal') — apenas erros.push(e(
+  const rawStringPush = /erros\.push\('[^)]+'\)/.test(veBody);
+  assert('erros.push só recebe objetos (via helper e())', !rawStringPush);
+  assert('token errors wrapped: errosToken.map(msg=>e(', veBody.includes('errosToken.map(msg=>e('));
+  assert('avisos wrapped: avisosToken.map(msg=>a(', veBody.includes('avisosToken.map(msg=>a('));
+}
+
 // ── Resultado ─────────────────────────────────────────────────────────────
 console.log(`\n${'─'.repeat(52)}`);
 console.log(`Resultado: ${passou} ✓  ${falhou} ✗\n`);

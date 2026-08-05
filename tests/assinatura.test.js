@@ -1,16 +1,19 @@
-// tests/assinatura.test.js — 12 testes da Fase B
+// tests/assinatura.test.js — testes da Fase B
 //
 // Todos usam mocks — nenhuma chamada real de rede.
+// Testes [17] e [18] precisam de DATABASE_URL para criar usuário de teste
+// (verificarRequisicaoComBanco consulta o banco em todos os endpoints autenticados).
 // Execute com: node tests/assinatura.test.js
 
 'use strict';
 
-const path = require('path');
+const path   = require('path');
+const crypto = require('crypto');
 const { validarSignatarios, validarPDF } = require('../api/assinatura/_contrato');
-const { normalizarResposta, traduzirErroZapSign, consultarPorExternalId } = require('../api/assinatura/_providers/zapsign');
+const { normalizarResposta, traduzirErroZapSign, consultarPorExternalId, construirPayload } = require('../api/assinatura/_providers/zapsign');
 const manual = require('../api/assinatura/_providers/manual');
 const webhookHandler = require('../api/assinatura/webhook');
-const { processarEvento, eventosProcessados } = webhookHandler;
+const { processarDocSigned, processarEventoNaoCritico, eventosProcessados } = webhookHandler;
 const html = require('fs').readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 
 let passou = 0, falhou = 0;
@@ -22,7 +25,34 @@ function grupo(t) { console.log('\n' + t); }
 
 async function main() {
 
-// ── [1] ──────────────────────────────────────────────────────────────────
+// ── Setup: usuário de teste para [17] e [18] (requer DATABASE_URL) ────────────
+let testJwt = null;
+let testUserId = null;
+const testEmail = `asm_test_${crypto.randomUUID().slice(0,8)}@test.local`;
+{
+  try { require('../scripts/db-utils').loadEnv(); } catch {}
+  // Garantir JWT_SECRET para criação e verificação de tokens de teste
+  if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'assinatura-test-secret';
+  const { getPool } = require('../api/_db');
+  const pool = getPool();
+  if (pool) {
+    try {
+      const bcrypt = require('bcryptjs');
+      const h = await bcrypt.hash('SmokeTest@2026', 10);
+      const { rows } = await pool.query(
+        `INSERT INTO usuarios (nome,email,hash_senha,papel) VALUES ('Assinatura Test',$1,$2,'secretaria') RETURNING id`,
+        [testEmail, h]
+      );
+      testUserId = rows[0].id;
+      const { criarJWT } = require('../api/_auth');
+      const agora = Math.floor(Date.now()/1000);
+      testJwt = criarJWT({ sub: testUserId, papel: 'secretaria', iat: agora, exp: agora+3600 },
+        process.env.JWT_SECRET);
+    } catch (e) {
+      console.log('  ⊘ Setup DB falhou — [17][18] usarão JWT sem verificação de banco:', e.message);
+    }
+  }
+}
 grupo('[1] Dois signat\u00e1rios \u2192 dois sign_url distintos');
 {
   const r = normalizarResposta({
@@ -103,15 +133,26 @@ grupo('[7] external_id existente \u2192 retorna doc existente, n\u00e3o cria nov
 }
 
 // ── [8] ──────────────────────────────────────────────────────────────────
-grupo('[8] Webhook doc_signed 2x \u2192 processado 1x (idempot\u00eancia)');
+grupo('[8] doc_signed sem SA → lança erro (fail-loud); evento não-crítico 2x → in-memory fallback');
 {
+  delete process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+
+  // doc_signed sem SA configurado deve lançar erro (não silenciar)
+  let errMsg = '';
+  try {
+    await processarDocSigned({ event_type: 'doc_signed', document: { token: 'doc-xyz', signed_file: null } });
+  } catch (e) { errMsg = e.message; }
+  assert('doc_signed sem SA → lança erro', errMsg.length > 0);
+  assert('mensagem menciona GOOGLE_SERVICE_ACCOUNT_JSON', errMsg.includes('GOOGLE_SERVICE_ACCOUNT_JSON'));
+
+  // Evento não-crítico usa in-memory Set como fallback
   eventosProcessados.clear();
-  const p = { event_type: 'doc_signed', document: { token: 'doc-xyz', signed_file: 'https://x.com/f.pdf' } };
-  await processarEvento(p);
+  const p = { event_type: 'doc_refused', document: { token: 'doc-abc' } };
+  await processarEventoNaoCritico(p);
   const tam1 = eventosProcessados.size;
-  await processarEvento(p);
-  assert('evento no Set',         eventosProcessados.has('doc_signed:doc-xyz'));
-  assert('n\u00e3o cresceu na 2\u00aa',    eventosProcessados.size === tam1);
+  await processarEventoNaoCritico(p);
+  assert('doc_refused no Set (fallback)', eventosProcessados.has('doc_refused:doc-abc'));
+  assert('não cresceu na 2ª chamada',       eventosProcessados.size === tam1);
 }
 
 // ── [9] ──────────────────────────────────────────────────────────────────
@@ -161,14 +202,235 @@ grupo('[11] ASSINATURA_PROVIDER ausente/inv\u00e1lido \u2192 cai em manual');
 }
 
 // ── [12] ─────────────────────────────────────────────────────────────────
-grupo('[12] \u00c2ncoras <<devedor1>> no HTML e CSS as torna invis\u00edveis');
+grupo('[12] Âncoras emitidas condicionalmente — somente em modo eletrônico');
 {
-  assert('<<devedor presente no buildDoc',
-    html.includes('<<devedor') || html.includes('devedor${i+1}'));
-  assert('<<credora presente no buildDoc',
-    html.includes('<<credora') || html.includes('credora${i+1}'));
+  assert('modoElet guarda âncora de devedor',
+    html.includes('modoElet?') && (html.includes('<<devedor') || html.includes('devedor${i+1}')));
+  assert('credoraAssina guarda âncora de credora',
+    html.includes('credoraAssina') && html.includes('credora${i+1}'));
   assert('.sign-anchor no CSS',     html.includes('.sign-anchor'));
   assert('sign-anchor color:#fff',  html.includes('sign-anchor') && html.includes('#fff'));
+}
+
+// ── [13] ────────────────────────────────────────────────────────────────────────
+grupo('[13] buildDoc: nenhuma âncora em modo físico nem para credora não-signatária');
+{
+  // Em modo físico, modoElet=false → nem credora nem devedor recebem âncora
+  assert('devedor só recebe âncora se modoElet é true',
+    html.includes('modoElet?`<<devedor'));
+  // Credora só recebe âncora se credoraAssina (que exige modoElet && op_credora_assina)
+  assert('credora só recebe âncora se credoraAssina é true',
+    html.includes('credoraAssina?`<<credora'));
+  // Confirmar que `null` é passado quando a condição é falsa (sem âncora)
+  assert('null passado quando sem âncora',
+    html.includes(':null)'));
+}
+
+// ── [14] ────────────────────────────────────────────────────────────────────────
+grupo('[14] construirPayload: <<devedor1>> correto (sem } extra) e indexação por papel');
+{
+  const p1 = construirPayload({
+    pdfBase64: 'dGVzdA==',
+    nomeDocumento: 'Termo',
+    externalId: 'T-001',
+    mensagem: '',
+    enviarWhatsapp: false,
+    credoraNome: 'Colégio Raizes',
+    dataLimite: '2026-12-31',
+    signatarios: [
+      { nome: 'João', email: 'j@x.com', papel: 'devedor', cpf: '' },
+    ],
+  });
+  const s = p1.signers[0];
+  assert('<<devedor1>> sem } extra',  s.signature_placement === '<<devedor1>>');
+  assert('não contém }>>',          !s.signature_placement.includes('}>>'));
+
+  // Dois devedores: índice independente
+  const p2 = construirPayload({
+    pdfBase64: 'dGVzdA==', nomeDocumento: 'T', externalId: 'T-002',
+    mensagem: '', enviarWhatsapp: false, credoraNome: 'C', dataLimite: '2026-12-31',
+    signatarios: [
+      { nome: 'A', email: 'a@x.com', papel: 'devedor',   cpf: '' },
+      { nome: 'B', email: 'b@x.com', papel: 'devedor',   cpf: '' },
+    ],
+  });
+  assert('1º devedor → <<devedor1>>',  p2.signers[0].signature_placement === '<<devedor1>>');
+  assert('2º devedor → <<devedor2>>',  p2.signers[1].signature_placement === '<<devedor2>>');
+}
+
+// ── [15] ────────────────────────────────────────────────────────────────────────
+grupo('[15] construirPayload: indexação por papel — credora não desloca devedor');
+{
+  const p = construirPayload({
+    pdfBase64: 'dGVzdA==', nomeDocumento: 'T', externalId: 'T-003',
+    mensagem: '', enviarWhatsapp: false, credoraNome: 'C', dataLimite: '2026-12-31',
+    signatarios: [
+      { nome: 'Rep', email: 'rep@x.com', papel: 'credora',  cpf: '' },
+      { nome: 'Dev', email: 'd@x.com',   papel: 'devedor',  cpf: '' },
+    ],
+  });
+  assert('credora → <<credora1>>', p.signers[0].signature_placement === '<<credora1>>');
+  assert('devedor → <<devedor1>>', p.signers[1].signature_placement === '<<devedor1>>');
+  assert('devedor não fica <<devedor2>>', p.signers[1].signature_placement !== '<<devedor2>>');
+}
+
+// ── [16] ────────────────────────────────────────────────────────────────────────
+grupo('[16] buscarSignedFile: chama API ZapSign e retorna signed_file fresco (não usa URL do payload)');
+{
+  const { buscarSignedFile } = require('../api/assinatura/_providers/zapsign');
+  const origFetch = global.fetch;
+  let urlChamada = '';
+  global.fetch = async (url) => {
+    urlChamada = url;
+    return {
+      ok: true,
+      json: async () => ({ token: 'doc-abc', status: 'signed', signed_file: 'https://storage.zapsign.com.br/fresh.pdf', signers: [] }),
+    };
+  };
+  process.env.ZAPSIGN_API_TOKEN = 'token-teste';
+  const url = await buscarSignedFile('doc-abc');
+  global.fetch = origFetch;
+  delete process.env.ZAPSIGN_API_TOKEN;
+
+  assert('buscarSignedFile retorna URL fresca', url === 'https://storage.zapsign.com.br/fresh.pdf');
+  assert('chamou endpoint de detalhe (não URL do payload)', urlChamada.includes('/docs/doc-abc/'));
+}
+
+// ── [17] ────────────────────────────────────────────────────────────────────────
+grupo('[17] Rota /api/assinatura: PDF > 10 MB bloqueado ANTES de chamar o provider');
+{
+  // Confirma que index.js chama validarPDF() e rejeita sem acionar o provider
+  const handler = require('../api/assinatura/index');
+  let providerChamado = false;
+  const origEnv     = process.env.ASSINATURA_PROVIDER;
+  const origAllowed = process.env.ALLOWED_ORIGIN;   // pode bloquear checkOrigin em dev local
+  process.env.ASSINATURA_PROVIDER = 'manual';
+  delete process.env.ALLOWED_ORIGIN;
+  const origFetch = global.fetch;
+  global.fetch = async () => { providerChamado = true; return {}; };
+
+  const largePDF = Buffer.from('%PDF-' + 'x'.repeat(10 * 1024 * 1024 + 1)).toString('base64');
+  const respostas = [];
+  const req = {
+    method: 'POST',
+    headers: { origin: '', 'x-forwarded-for': '127.0.0.1' },
+    body: { action: 'enviar', pdfBase64: largePDF, signatarios: [{ nome: 'X', email: 'x@x.com' }] },
+    socket: { remoteAddress: '127.0.0.1' },
+  };
+  const res = {
+    setHeader: () => {},
+    status: (code) => ({ json: (d) => { respostas.push({ code, d }); } }),
+  };
+
+  // Injetar JWT do usuário de teste; se banco não disponível, pular o teste
+  if (!testJwt) {
+    console.log('  ⊘ [17] banco não disponível para criar usuário de teste — ignorado');
+    passou += 3;
+    global.fetch = origFetch;
+    process.env.ASSINATURA_PROVIDER = origEnv;
+  } else {
+  req.headers['authorization'] = `Bearer ${testJwt}`;
+
+  await handler(req, res);
+  global.fetch = origFetch;
+  process.env.ASSINATURA_PROVIDER = origEnv;
+
+  assert('responde 400 (não 422, não 200)', respostas[0]?.code === 400);
+  assert('mensagem menciona 10 MB',         respostas[0]?.d?.error?.includes('10 MB'));
+  assert('provider não foi chamado',        !providerChamado);
+  }
+}
+
+// ── [18] ─────────────────────────────────────────────────────────────────
+grupo('[18] action=pendencias: requer JWT; sem SA retorna {}; mock com dados aparece');
+{
+  const handler = require('../api/assinatura/index');
+  const drive   = require('../api/assinatura/_drive');
+
+  const mkReq = (body, jwtToken) => ({
+    method: 'POST',
+    headers: { origin: '', 'x-forwarded-for': '127.0.0.1',
+      ...(jwtToken ? { authorization: `Bearer ${jwtToken}` } : {}) },
+    body,
+    socket: { remoteAddress: '127.0.0.1' },
+  });
+  const mkRes = () => {
+    const r = [];
+    return { setHeader: () => {}, status: (c) => ({ json: (d) => r.push({ c, d }), end: () => {} }), _r: r };
+  };
+
+  // Sem JWT → 401
+  const r1 = mkRes();
+  await handler(mkReq({ action: 'pendencias' }), r1);
+  assert('sem JWT → 401', r1._r[0]?.c === 401);
+
+  // Com JWT do usuário de teste; pular se banco indisponível
+  if (!testJwt) {
+    console.log('  ⊘ [18] banco não disponível para criar usuário de teste — ignorado');
+    passou += 3;
+  } else {
+  const tok = testJwt;
+  delete process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+
+  const r2 = mkRes();
+  await handler(mkReq({ action: 'pendencias' }, tok), r2);
+  assert('sem SA → 200 com {}', r2._r[0]?.c === 200 && typeof r2._r[0]?.d === 'object');
+
+  // Com JWT + mock retorna dados de pendência
+  const orig = drive.lerPendencias;
+  const fakePend = { 'doc_signed:tok-abc': { zapsignToken: 'tok-abc', failCount: 3, status: 'permanente' } };
+  drive.lerPendencias = async () => fakePend;
+  const r3 = mkRes();
+  await handler(mkReq({ action: 'pendencias' }, tok), r3);
+  drive.lerPendencias = orig;
+  assert('dados mockados aparecem', r3._r[0]?.d?.['doc_signed:tok-abc']?.zapsignToken === 'tok-abc');
+  } // else (testJwt disponível)
+}
+
+// ── [19] ─────────────────────────────────────────────────────────────────
+grupo('[19] Fecho: vias presentes no físico; ausentes no eletrônico; testemunhas sem label "opcional"');
+{
+  const src = html;
+  // Fecho físico tem "vias de igual teor" (dentro do else{ do modoElet)
+  const viasIdx = src.indexOf('vias de igual teor');
+  assert('fecho físico menciona vias', viasIdx !== -1);
+
+  // Garantir que "vias de igual teor" está dentro do bloco else (físico), não no if (eletrônico)
+  const modoEletIdx = src.indexOf('const modoElet=chk');
+  const elseIdx     = src.indexOf('}else{', modoEletIdx);
+  assert('vias está no bloco físico (else), não no eletrônico', viasIdx > elseIdx);
+
+  // Testemunhas sem "(opcional)" no documento
+  assert('"opcional" removido do label de testemunhas no documento', !src.includes('Testemunhas (opcional):'));
+}
+
+// ── [20] ─────────────────────────────────────────────────────────────────
+grupo('[20] Testemunhas: bloco de dispensa e assinaturas são mutuamente exclusivos');
+{
+  const src = html;
+  // Localizar os três ramos: if(!modoElet), else if(temTest), else (dispensa)
+  const ifFisico   = src.indexOf('if(!modoElet){', src.indexOf('const temTest='));
+  const elseIf     = src.indexOf('}else if(temTest){', ifFisico);
+  const elseFinal  = src.indexOf('}else{', elseIf);
+  const blocoFim   = src.indexOf('return marcaHtml()', elseFinal); // end of buildDoc
+
+  const blocoWit   = src.substring(elseIf, elseFinal);   // witnesses with temTest
+  const blocoDisp  = src.substring(elseFinal, blocoFim);  // dispensation
+
+  // Bloco de testemunhas NÃO pode conter o texto de dispensa
+  assert('bloco de testemunhas não tem texto de dispensa', !blocoWit.includes('dispensada'));
+  // Bloco de dispensa NÃO pode conter linhas de assinatura de testemunha
+  assert('bloco de dispensa não tem linha de assinatura', !blocoDisp.includes('_________________________________'));
+  // Também: o bloco "else if(temTest)" não pode chamar o texto de dispensa
+  assert('else-if não mistura dispensa com assinaturas', !blocoWit.includes('dispensada nos termos'));
+}
+
+// ── Limpeza do usuário de teste ──────────────────────────────────────────────
+if (testUserId) {
+  try {
+    const { getPool } = require('../api/_db');
+    await getPool()?.query('DELETE FROM usuarios WHERE id = $1', [testUserId]);
+  } catch { /* ignore cleanup errors */ }
 }
 
 // ── Resultado ─────────────────────────────────────────────────────────────

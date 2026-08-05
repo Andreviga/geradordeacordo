@@ -32,18 +32,17 @@ function extrairCorpo(nome) {
 }
 
 // Rotas que DEVEM chamar podeExportar()
+// salvarWordDrive e salvarPdfDrive removidas: seção 10 (Google Drive OAuth) foi substituída
+// pela service account no servidor (api/assinatura/_drive.js)
 const ROTAS_DOCUMENTO = [
   'exportWord',
   'printPdf',
   'baixarPdf',
-  'salvarWordDrive',
-  'salvarPdfDrive',
   'enviarAssinatura',   // substitui enviarAdobeSign como rota principal
 ];
 
 // Rotas que NÃO precisam chamar podeExportar() (sem exportação de documento)
 const ROTAS_DADOS = [
-  'salvarDrive',        // salva JSON de dados, não documento
   'saveJson',           // download JSON local
   'enviarAdobeSign',    // stub que delega para enviarAssinatura()
 ];
@@ -76,6 +75,28 @@ for (const fn of ROTAS_DADOS) {
     ? `${fn}() é stub que delega para enviarAssinatura() (não chama diretamente)`
     : `${fn}() não bloqueia exportação de dados`;
   assert(desc, !corpo.includes('podeExportar()'));
+}
+
+// Varredura estrutural: nenhuma função chamada por onclick pode chamar
+// podeExportar() sem estar declarada em ROTAS_DOCUMENTO.
+// Isso detecta novos pontos de entrada sem atualizar a lista.
+console.log('\n[Cobertura derivada do HTML: nenhuma rota de exportação fora das listas]\n');
+const todasDeclaradas = new Set([...ROTAS_DOCUMENTO, ...ROTAS_DADOS]);
+const fnOnclick = [...html.matchAll(/onclick="(\w+)\(/g)].map(m => m[1]);
+const naoCobertas = [...new Set(fnOnclick)].filter(fn => {
+  if (todasDeclaradas.has(fn)) return false;
+  const corpo = extrairCorpo(fn);
+  return corpo && corpo.includes('podeExportar()');
+});
+if (naoCobertas.length) console.error('  Funções não declaradas que chamam podeExportar():', naoCobertas);
+assert('Nenhuma rota de exportação fora das listas testadas', naoCobertas.length === 0);
+
+// abrirNovaAba: revalida via podeExportar() no caminho de erro (catch de exportWord/printPdf)
+console.log('\n[abrirNovaAba: revalida no caminho de erro]\n');
+{
+  const corpo = extrairCorpo('abrirNovaAba');
+  assert('abrirNovaAba revalida via podeExportar()', corpo?.includes('podeExportar()'));
+  assert('abrirNovaAba sem fallback wordHtml() sem validação', !corpo?.includes('wordHtml()'));
 }
 
 console.log(`\n${'─'.repeat(52)}`);

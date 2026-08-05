@@ -51,24 +51,25 @@ function traduzirErroZapSign(status, body) {
 // ── Construção do payload ─────────────────────────────────────────────────
 function construirPayload({ pdfBase64, nomeDocumento, signatarios, mensagem, externalId, enviarWhatsapp, credoraNome, dataLimite }) {
   const QUALIFICACOES = { devedor: 'devedor', credora: 'credora', testemunha: 'testemunha' };
+  const roleIdx = {}; // contador por papel para indexação correta das âncoras
 
   const signersList = signatarios.map((s, i) => {
     const papel  = QUALIFICACOES[s.papel] || 'devedor';
+    // Contar por papel para que <<devedor1>> sempre case com o 1º devedor, independente da ordem global
+    roleIdx[papel] = (roleIdx[papel] || 0) + 1;
     const signer = {
       name:                    s.nome || s.email,
       email:                   s.email,
-      auth_mode:               'assinaturaTela-tokenEmail', // gratuito; SMS/WhatsApp/ICP são pagos
+      auth_mode:               'assinaturaTela-tokenEmail',
       lock_name:               true,
       lock_email:              true,
       require_cpf:             !!(s.cpf),
-      validate_cpf:            !!(s.cpf), // gratuito; valida CPF+nome+nascimento na Receita Federal
+      validate_cpf:            !!(s.cpf) && (process.env.ZAPSIGN_VALIDATE_CPF === 'true'),
       send_automatic_email:    true,
-      send_automatic_whatsapp: false,     // default off — custo R$ 0,50 por envio
+      send_automatic_whatsapp: false,
       qualification:           papel,
       custom_message:          mensagem || '',
-      // Âncora de posicionamento — deve coincidir com o texto invisível no PDF
-      signature_placement:     `<<${papel}${i + 1}>>`,
-      // Fase E: external_id do signatário (CPF ou ID gerado)
+      signature_placement:     `<<${papel}${roleIdx[papel]}>>`,
       external_id: s.externalId || (s.cpf ? s.cpf.replace(/\D/g, '') : gerarExternalId(`signer-${i + 1}`)),
     };
 
@@ -204,8 +205,20 @@ async function consultar(documentoId) {
   }
 }
 
+// Busca URL fresca do PDF assinado — nunca persistir: expira em 60 min.
+// Chamada na hora de baixar, não baseada na URL do payload do webhook.
+async function buscarSignedFile(tokenDoc) {
+  const apiToken = process.env.ZAPSIGN_API_TOKEN;
+  if (!apiToken) throw new Error('ZAPSIGN_API_TOKEN não configurado');
+  const r = await fetch(`${BASE_URL}/docs/${encodeURIComponent(tokenDoc)}/`, {
+    headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(traduzirErroZapSign(r.status, data).error);
+  return data.signed_file || null;
+}
+
 module.exports = {
-  enviar, consultar,
-  // Exportados para os testes unitários
+  enviar, consultar, buscarSignedFile,
   construirPayload, normalizarResposta, traduzirErroZapSign, consultarPorExternalId,
 };

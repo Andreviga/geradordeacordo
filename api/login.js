@@ -1,74 +1,76 @@
-// api/login.js — autenticação com senha + JWT de 8h
-//
-// Variáveis de ambiente obrigatórias:
-//   APP_PASSWORD_HASH  — hash bcrypt da senha (gere com: npm run hash)
-//   JWT_SECRET         — segredo para assinar tokens (gere com: openssl rand -hex 32)
-
 'use strict';
+// api/login.js — autenticação exclusivamente via banco de dados (Fase E)
+// Sem DATABASE_URL = sem login. Não há caminho paralelo de autenticação.
 
 const bcrypt = require('bcryptjs');
-const { criarJWT } = require('./_auth');
+const { criarJWT, applyCors } = require('./_auth');
+const { getPool }             = require('./_db');
 
-// Rate limiting específico para login: janela maior e limite menor
 const tentativas = new Map();
-const MAX_TENTATIVAS = 5;
-const JANELA_MS = 15 * 60 * 1000; // 15 minutos
+const MAX = 5, JANELA = 15 * 60 * 1000;
 
 function limitarLogin(ip) {
   const now = Date.now();
   let e = tentativas.get(ip);
-  if (!e || now > e.resetAt) e = { count: 0, resetAt: now + JANELA_MS };
+  if (!e || now > e.resetAt) e = { count: 0, resetAt: now + JANELA };
   e.count++;
   tentativas.set(ip, e);
-  return e.count <= MAX_TENTATIVAS;
+  return e.count <= MAX;
 }
 
 module.exports = async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  applyCors(req, res);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido.' });
+  if (req.method !== 'POST')   return res.status(405).json({ error: 'Método não permitido.' });
 
   const ip = ((req.headers['x-forwarded-for'] || '') || req.socket?.remoteAddress || 'unknown')
     .split(',')[0].trim();
+  if (!limitarLogin(ip))
+    return res.status(429).json({ error: 'Muitas tentativas. Aguarde 15 minutos.' });
 
-  if (!limitarLogin(ip)) {
-    return res.status(429).json({
-      error: 'Muitas tentativas de login. Aguarde 15 minutos.',
-    });
-  }
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret)
+    return res.status(503).json({ error: 'JWT_SECRET não configurado no servidor.' });
 
-  const { senha } = req.body || {};
-  if (!senha || typeof senha !== 'string' || !senha.trim()) {
-    return res.status(400).json({ error: 'Senha obrigatória.' });
-  }
-
-  const hashArmazenado = process.env.APP_PASSWORD_HASH;
-  const jwtSecret     = process.env.JWT_SECRET;
-
-  if (!hashArmazenado || !jwtSecret) {
+  const pool = getPool();
+  if (!pool)
     return res.status(503).json({
-      error: 'Servidor não configurado. Defina APP_PASSWORD_HASH e JWT_SECRET no Vercel.',
+      error: 'Banco de dados não configurado. Defina DATABASE_URL e crie um usuário com npm run db:criar-admin.',
     });
+
+  const { email, senha } = req.body || {};
+  if (!senha || typeof senha !== 'string' || !senha.trim())
+    return res.status(400).json({ error: 'Senha obrigatória.' });
+  if (!email || typeof email !== 'string' || !email.includes('@'))
+    return res.status(400).json({ error: 'E-mail obrigatório.' });
+
+  let usuario;
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, hash_senha, papel, ativo FROM usuarios WHERE email = $1',
+      [email.trim().toLowerCase()]
+    );
+    usuario = rows[0];
+  } catch {
+    return res.status(503).json({ error: 'Banco indisponível. Tente novamente.' });
   }
 
-  const senhaValida = await bcrypt.compare(senha, hashArmazenado);
-  if (!senhaValida) {
-    // Mesma mensagem independente do motivo — não revelar se o hash existe
-    return res.status(401).json({ error: 'Senha incorreta.' });
-  }
+  // Hash de referência constante para evitar timing oracle quando usuário não existe
+  const hashRef = usuario?.hash_senha || '$2a$10$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.';
+  const ok = await bcrypt.compare(senha, hashRef);
 
-  // Senha correta — emitir JWT de 8 horas
+  if (!ok || !usuario) return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
+  if (!usuario.ativo)  return res.status(401).json({ error: 'Conta desativada. Contate o administrador.' });
+
+  pool.query('UPDATE usuarios SET ultimo_acesso = NOW() WHERE id = $1', [usuario.id]).catch(() => {});
+
   const agora = Math.floor(Date.now() / 1000);
-  const payload = {
-    // Fase E: sub e papel virão da tabela de usuários
-    sub:   'usuario',
-    papel: 'secretaria',
-    iat:   agora,
-    exp:   agora + 8 * 3600,
-  };
-
-  return res.status(200).json({ token: criarJWT(payload, jwtSecret) });
+  return res.status(200).json({
+    token: criarJWT({
+      sub: usuario.id, email: email.trim().toLowerCase(),
+      papel: usuario.papel, iat: agora, exp: agora + 8 * 3600,
+    }, jwtSecret),
+  });
 };

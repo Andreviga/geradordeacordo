@@ -133,7 +133,203 @@ global garantido, seria necessário migrar o contador para um KV externo (ex.: V
 
 ---
 
-## 5. Observações
+## 5. Assinatura digital (ZapSign) e persistência de PDFs
+
+### Conta de serviço Google (Service Account)
+
+O webhook `/api/assinatura/webhook` recebe o evento `doc_signed` da ZapSign, baixa o PDF assinado
+do URL temporário (expira em 60 min) e sobe para o Google Drive usando uma **conta de serviço** —
+não a conta pessoal de ninguém.
+
+**Pré-requisitos:**
+
+1. Google Workspace (Drive Compartilhado). Arquivos criados por SA em "Meu Drive" pessoal ficam
+   sob cota da SA e podem ser bloqueados por políticas de Workspace. Use um **Drive Compartilhado**
+   da escola onde a SA tenha acesso de Contribuidor.
+2. No Google Cloud Console:
+   - Ative a **Google Drive API** no projeto.
+   - Crie uma Service Account (IAM → Service Accounts → Create).
+   - Gere e baixe a chave JSON (Manage keys → Add key → JSON).
+3. Compartilhe a pasta do Drive Compartilhado com o e-mail da SA
+   (`nome@projeto.iam.gserviceaccount.com`) — papel: **Contribuidor**.
+4. Copie o ID da pasta da URL do Drive: `https://drive.google.com/drive/folders/`**`ID`**.
+
+**Formato da variável `GOOGLE_SERVICE_ACCOUNT_JSON`:**
+
+O JSON da SA contém quebras de linha na `private_key`. Alguns painéis de variáveis
+(incluindo o da Vercel) interpretam incorretamente. Use **base64** para evitar o problema:
+
+```bash
+# macOS / Linux
+base64 -w0 service-account.json   # -w0 = sem quebra de linha
+
+# PowerShell (Windows)
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("service-account.json"))
+```
+
+Cole o resultado (uma linha só, sem espaços) em `GOOGLE_SERVICE_ACCOUNT_JSON`.
+O código aceita tanto JSON direto quanto base64 do JSON.
+
+**Variáveis de ambiente no Vercel (Settings → Environment Variables):**
+
+| Variável | Obrigatória para `doc_signed` | Descrição |
+|---|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Sim | JSON da SA ou base64 do JSON |
+| `DRIVE_PDF_FOLDER_ID` | Sim | ID da pasta no Drive Compartilhado |
+| `ZAPSIGN_WEBHOOK_SECRET` | Sim | Segredo do webhook (painel ZapSign) |
+| `ZAPSIGN_API_TOKEN` | Sim (envio) | Token da API ZapSign |
+| `ZAPSIGN_VALIDATE_CPF` | Não | `true` para validar CPF na Receita; testar antes de ativar |
+
+> **Sem `GOOGLE_SERVICE_ACCOUNT_JSON` configurado:** o webhook responde `500` no evento
+> `doc_signed` e a ZapSign reenvia. Não há fallback silencioso.
+
+### LGPD — dados pessoais persistidos
+
+A pasta indicada em `DRIVE_PDF_FOLDER_ID` acumula documentos sensíveis:
+
+| Arquivo | Conteúdo | Base legal (LGPD) |
+|---|---|---|
+| `Assinado-{externalId}.pdf` | CPF, nome, endereço dos responsáveis e dados de menores | Art. 7º, V (execução de contrato) |
+| `_eventos_webhook.json` | Tokens ZapSign (sem PII) | Legítimo interesse (idempotência) |
+
+**Requisitos mínimos:**
+- Compartilhe a pasta **somente** com a conta de serviço e com as pessoas da secretaria.
+  Nunca use "Qualquer pessoa com o link".
+
+---
+
+## Banco de dados (Fase E)
+
+### Pré-requisitos
+
+- `DATABASE_URL` definida no `.env.local` (desenvolvimento) ou no painel do Vercel (produção).
+- Copie a connection string diretamente de: painel Neon → projeto → **Connection Details** → _Connection string_.
+  Formato: `postgresql://usuario:senha@host.neon.tech/banco?sslmode=require`
+
+### Comandos
+
+| Comando | O que faz | Altera dados? |
+|---------|-----------|:---:|
+| `npm run db:migrate` | Aplica `db/schema.sql` e verifica o resultado | Sim (DDL) |
+| `npm run db:status` | Verifica o schema sem alterar nada | Não |
+| `npm run db:criar-admin` | Cria o primeiro usuário admin interativamente | Sim |
+
+### Ordem de execução (primeira vez)
+
+```bash
+# 1. Instalar dependências (inclui o driver pg)
+npm install
+
+# 2. Aplicar o schema e verificar
+npm run db:migrate
+
+# 3. Criar o primeiro usuário administrador
+npm run db:criar-admin
+```
+
+O script `db:migrate` é idempotente: pode ser rodado novamente após falha parcial sem risco.
+O script `db:status` é seguro para rodar a qualquer momento em produção — só lê.
+
+### Primeiro usuário
+
+Use `npm run db:criar-admin`. O script pede nome, e-mail e senha no terminal (senha mascarada),
+confirma antes de gravar e recusa se o e-mail já existir.
+
+**Use um e-mail real da pessoa que vai administrar o sistema** — não o e-mail de notificações.
+O campo é `UNIQUE` e é o login do sistema.
+
+**Crie como `admin`** (o script sempre cria admin) — sem um admin, nenhum outro
+usuário pode ser criado depois pela interface.
+
+---
+
+## Revisão jurídica
+
+| Data       | Escopo revisado | Status |
+|------------|-----------------|--------|
+| 2026-08-04 | Fecho eletrônico (assinatura digital + dispensa de testemunhas, art. 784 §4º CPC) | ✅ Aprovado |
+| 2026-08-04 | Fecho físico (duas vias + duas testemunhas, art. 784 III CPC) | ✅ Aprovado |
+| 2026-08-04 | Texto de dispensa de testemunhas no modo eletrônico | ✅ Aprovado |
+| Pendente   | Cláusulas do corpo do acordo (multa moratória, multa penal, juros, cumulação) | ⚠ Não revisado |
+| Pendente   | Cláusula de foro de eleição | ⚠ Não revisado |
+| Pendente   | Qualificação das partes e cláusulas de confissão de dívida | ⚠ Não revisado |
+
+> As cláusulas "Não revisado" foram redigidas com base em modelos usuais e precisam de
+> validação por advogado antes de uso em situações de risco jurídico elevado.
+
+---
+
+## Primeiro usuário (cadastro manual)
+
+Enquanto não houver tela de gerenciamento, o primeiro usuário é criado via `psql`.
+**Crie como `admin`** — sem um admin, nenhum outro usuário pode ser criado depois.
+
+```sql
+-- Gere o hash da senha com: npm run hash
+INSERT INTO usuarios (nome, email, hash_senha, papel)
+VALUES (
+  'Nome da Secretaria',
+  'email-real@dominio.com.br',  -- campo UNIQUE; é o login
+  '$2a$10$...',                  -- hash gerado por npm run hash
+  'admin'
+);
+```
+
+> O campo `email` é `UNIQUE`. Use o e-mail real da pessoa que vai administrar o sistema,
+> não o e-mail de notificações (`notificacoesraizes@gmail.com`).
+- Defina prazo de retenção antes de colocar em produção (sugestão: 5 anos após quitação
+  ou conforme orientação jurídica e PROCON).
+- A Fase E implementará exclusão automática via rotina agendada.
+
+### Política de retry da ZapSign
+
+> ⚠️ **Não confirmado na documentação oficial.** O número abaixo (`MAX_RETRIES = 3`) é
+> baseado em comportamento comumente observado em provedores de webhook — não em documentação
+> explícita da ZapSign. Ajuste a constante em `webhook.js` após confirmar com o suporte
+> ou com os logs do painel ZapSign → Integrações → Webhooks → Histórico.
+
+Comportamento assumido (confirmar com ZapSign antes de ir para produção):
+- ~3 retentativas com backoff exponencial após falha ou timeout
+- Após esgotar: ZapSign para de tentar
+
+O webhook responde:
+- `500` em falhas de `doc_signed` (para acionar retentativa)
+- Após `MAX_RETRIES=3` falhas persistidas no Drive: responde `200` para parar o loop
+  e grava em `_pendencias.json` (visível via `action=pendencias`)
+- Logs: `[drive] 🔴 FALHA PERMANENTE` + ZapSign token para recuperação manual
+
+**Recuperação manual após falha permanente:** o token ZapSign aparece no log e em
+`_pendencias.json`. Com ele, acesse o painel ZapSign → Documentos → busca pelo token
+para baixar o PDF assinado manualmente.
+
+**Dependência circular:** se a falha for no Drive (e não na ZapSign), `marcarFalha`
+não consegue gravar. Nesse caso, o ZapSign token ainda aparece nos logs do Vercel como
+último recurso. Substitua por banco de dados na Fase E.
+
+### Texto dos fechos — revisão jurídica obrigatória
+
+> ⚠️ **Os três textos abaixo são rascunhos funcionais e precisam de revisão pela
+> assessoria jurídica do colégio antes de entrar em produção.**
+
+Ponto específico a confirmar: a ZapSign entrega o relatório de auditoria **embutido** no
+PDF assinado ou como arquivo separado? Se vier separado, qualquer cláusula que afirme
+que o relatório "integra este instrumento" ou é "indissociável deste" cria contradição
+com o documento em si.
+
+Texto atualmente em uso no modo eletrônico:
+> "...cuja integridade é conferida pela plataforma de assinatura digital utilizada,
+> dispensada a assinatura de testemunhas na forma do art. 784, §4º, do Código de Processo
+> Civil (Lei nº 14.620/2023). A autenticidade pode ser verificada no portal da plataforma
+> pelo código de autenticação do documento."
+
+Redação exata do §4º (Lei nº 14.620/2023):
+> "Nos títulos executivos constituídos ou atestados por meio eletrônico, é admitida
+> qualquer modalidade de assinatura eletrônica prevista em lei, dispensada a assinatura
+> de testemunhas quando sua integridade for conferida por provedor de assinatura."
+
+---
+
+## 6. Observações
 
 - Cabeçalho, rodapé e marca d'água estão embutidos no `index.html` em base64: não existe
   pasta de imagens para quebrar.

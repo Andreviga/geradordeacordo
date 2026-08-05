@@ -6,6 +6,7 @@
 <title>Gerador de Termo de Confissão de Dívida — Colégio Raízes</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root{
   --bg:#e9ecf1; --surface:#fff; --ink:#12203a; --ink-2:#48566f;
@@ -122,25 +123,89 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 .login-card h2{margin:0 0 2px;font-size:17px;font-weight:700;color:var(--ink)}
 .login-sub{margin:0 0 28px;font-size:12px;color:var(--ink-2)}
 .login-erro{color:var(--alert);font-size:12.5px;padding:8px 10px;background:#fbeeea;border-radius:var(--radius);margin:-6px 0 14px}
+#painelValidacao{top:var(--offset-sticky,57px)}
 
+/* ─── Tab navigation (mobile) ─── */
+.mobile-tabs{display:none;position:sticky;top:var(--topbar-h,57px);z-index:28;background:var(--surface);border-bottom:2px solid var(--line)}
+.mobile-tab{flex:1;padding:11px 8px;text-align:center;cursor:pointer;font-size:13px;font-weight:600;border:none;background:none;color:var(--ink-2);border-bottom:3px solid transparent}
+.mobile-tab.active{color:var(--seal);border-bottom-color:var(--seal)}
+.mobile-tab:hover:not(.active){background:#f4f6f9}
+
+/* ─── Bottom action bar (mobile) ─── */
+.mobile-bottom{display:none;position:fixed;bottom:0;left:0;right:0;z-index:50;background:var(--ink);border-top:3px solid var(--seal);padding:8px 10px;padding-bottom:max(8px,env(safe-area-inset-bottom));gap:6px}
+.mobile-bottom .btn{flex:1;font-size:12px;padding:10px 4px;min-height:44px;text-align:center}
+
+/* ─── Tablet: 600–900px ─── */
 @media(max-width:900px){
   .shell{grid-template-columns:1fr}
   .panel,.stage{height:auto;overflow:visible}
   .page{min-height:0}
   .sheet{padding:110px 30px 90px}
+  .mobile-tabs{display:flex}
+  .topbar-util{display:none}
+  .panel{padding-bottom:16px}
+}
+
+/* ─── Phone: < 600px ─── */
+@media screen and (max-width:600px){
+  .topbar{padding:8px 12px;gap:8px}
+  .topbar h1{font-size:13px}
+  .topbar .sub{display:none}
+  .topbar-export{display:none}
+  .mobile-bottom{display:flex}
+  .panel{padding-bottom:80px}
+
+  /* Prevent iOS auto-zoom on inputs (requires font-size ≥ 16px) */
+  input[type=text],input[type=date],input[type=number],
+  input[type=email],input[type=tel],input[type=password],
+  select,textarea{font-size:16px!important}
+
+  /* Larger touch targets */
+  .btn.small{min-height:38px;padding:8px 10px}
+  .group>summary{padding:14px 14px}
+  .body{padding:10px 12px 18px}
+
+  /* Preview scrollable — regras de conteúdo limitadas ao .stage para não vazar no PDF */
+  .stage{padding:8px 0;justify-content:flex-start;overflow-x:auto;overflow-y:visible;align-items:flex-start}
+  .stage .page{min-width:600px}
+  .stage .sign .line{width:min(330px,80vw)}
+  .stage .page table{display:block;overflow-x:auto;width:auto;max-width:100%}
+}
+
+/* ─── Small phones: < 400px ─── */
+@media(max-width:400px){
+  .mobile-tab{font-size:12px;padding:10px 4px}
+  .login-card{padding:24px 16px;width:100%}
+  .mobile-bottom .btn{font-size:11px;padding:9px 2px}
+  .topbar h1{font-size:12px}
 }
 @media print{
-  .topbar,.panel,#toast{display:none!important}
+  .topbar,.panel,#toast,.mobile-tabs,.mobile-bottom{display:none!important}
   .shell{display:block}
-  .stage{height:auto;overflow:visible;padding:0;display:block}
+  .stage{display:block!important;height:auto;overflow:visible;padding:0}
   .page{box-shadow:none;max-width:none;width:auto;min-height:0}
+  .page table{display:table!important;width:100%!important}
+  .sign .line{width:87mm}
   .sheet{padding:0}
+  /* P2.2: position:fixed repete em todas as páginas no Chrome (Playwright) e Firefox 127+.
+     Matemática: @page margin-top=3.5cm → content area começa a 3.5cm do topo.
+     lh-header{top:-2.7cm} = 3.5-2.7=0.8cm do topo físico → dentro da margem, sem invasão do corpo.
+     lh-footer{bottom:-1.9cm} = dentro da margem inferior de 2.5cm → sem invasão.
+     Safari: position:fixed não repete em todas as páginas; usar baixarPdf() (html2pdf/Chrome) como alternativa. */
   @page{size:A4;margin:3.5cm 1.9cm 2.5cm 1.9cm}
-  .lh-header{position:fixed;top:-2.7cm;left:0;right:0}
-  .lh-footer{position:fixed;bottom:-1.9cm;left:0;right:0}
+  .lh-header{position:fixed;top:-2.7cm;left:0;right:0;background:#fff}
+  .lh-footer{position:fixed;bottom:-1.9cm;left:0;right:0;background:#fff}
+  /* P2.3: quebras de página */
+  .page h2{break-after:avoid;page-break-after:avoid}
+  .page h2+p,.page h2+div{break-before:avoid;page-break-before:avoid}
+  .page p{orphans:3;widows:3}
+  .assinaturas{break-inside:avoid;page-break-inside:avoid}
+  .wit{break-inside:avoid;page-break-inside:avoid}
+  .page table tr{break-inside:avoid;page-break-inside:avoid}
+  .sign{break-inside:avoid;page-break-inside:avoid}
+  /* P2.4: marca d'água — opacidade controlada pelo slider; sem z-index negativo
+     (z-index:-1 ficaria atrás do background:#fff do header e desapareceria) */
   .lh-mark{position:fixed;top:50%;left:50%;width:11cm}
-  .sign{page-break-inside:avoid}
-  table{page-break-inside:avoid}
 }
 </style>
 </head>
@@ -152,9 +217,13 @@ input[type=range]{width:100%;accent-color:var(--seal)}
     <h2>Gerador de Acordo</h2>
     <div class="login-sub">Colégio Raízes · Acesso restrito</div>
     <form id="loginForm" onsubmit="fazerLogin(event)">
+      <label for="loginEmail">E-mail</label>
+      <input type="email" id="loginEmail" placeholder="secretaria@escola.com.br"
+             autocomplete="username" required autofocus
+             style="width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:12px;font-size:14px;outline:none">
       <label for="loginSenha">Senha</label>
       <input type="password" id="loginSenha" placeholder="••••••••"
-             autocomplete="current-password" required autofocus
+             autocomplete="current-password" required
              style="width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:16px;font-size:14px;outline:none">
       <div id="loginErro" class="login-erro" style="display:none"></div>
       <button type="submit" class="btn primary" id="loginBtn" style="width:100%">Entrar</button>
@@ -162,18 +231,37 @@ input[type=range]{width:100%;accent-color:var(--seal)}
   </div>
 </div>
 
+<input type="file" id="imp" accept=".json" style="display:none;position:absolute" onchange="loadJson(this)">
 <header class="topbar">
-  <div><h1>Gerador de Acordo</h1><div class="sub">Confissão de dívida · papel timbrado · cláusulas editáveis</div></div>
+  <div class="topbar-brand"><h1>Gerador de Acordo</h1><div class="sub">Confissão de dívida · papel timbrado · cláusulas editáveis</div></div>
   <div class="spacer"></div>
-  <button class="btn ghost small" onclick="loadExample()">Exemplo</button>
-  <button class="btn ghost small" onclick="saveJson()">Salvar dados</button>
-  <button class="btn ghost small" onclick="document.getElementById('imp').click()">Abrir dados</button>
-  <input type="file" id="imp" accept=".json" style="display:none" onchange="loadJson(this)">
-  <button class="btn" onclick="exportWord()">Baixar Word</button>
-  <button class="btn" onclick="baixarPdf()">Baixar PDF</button>
-  <button class="btn primary" onclick="printPdf()">Imprimir / PDF</button>
+  <div class="topbar-util" style="display:flex;gap:6px;align-items:center">
+    <span id="autosave_indicator" style="font-size:11px;color:#9fb0c9;white-space:nowrap;margin-right:2px"></span>
+    <button class="btn ghost small" onclick="loadExample()">Exemplo</button>
+    <button class="btn ghost small" onclick="saveJson()">Salvar dados</button>
+    <button class="btn ghost small" onclick="document.getElementById('imp').click()">Abrir dados</button>
+    <button class="btn ghost small" onclick="limparDados()">Limpar</button>
+    <button class="btn ghost small" onclick="fazerLogout()" title="Encerra a sessão e apaga o rascunho">Sair</button>
+    <button class="btn ghost small" id="btnDashboard" onclick="abrirDashboard()" style="display:none">Dashboard</button>
+    <button class="btn ghost small" id="btnVencidas" onclick="abrirVencidas()" style="display:none">Vencidas</button>
+    <button class="btn ghost small" id="btnImportar" onclick="abrirImportar()" style="display:none" title="Cadastrar acordo já existente em papel">Importar acordo</button>
+  </div>
+  <div class="topbar-export" style="display:flex;gap:6px;align-items:center">
+    <button class="btn" onclick="exportWord()">Baixar Word</button>
+    <button class="btn" onclick="baixarPdf()">Baixar PDF</button>
+    <button class="btn" onclick="printPdf()">Imprimir / PDF</button>
+    <button class="btn" id="btnSalvarBanco" onclick="salvarNoBanco()" title="Salva o acordo no banco de dados">Salvar no banco</button>
+  </div>
+  <div style="font-size:11px;text-align:right;padding:2px 10px 0;color:#9fb0c9" id="bancoStatusBar">
+    <span id="bancoStatus"></span>
+    <button class="btn ghost small" id="btnVerAcordos" onclick="abrirListagem()" style="margin-left:6px;display:none">Ver acordos</button>
+  </div>
 </header>
-<div id="painelValidacao" style="display:none;position:sticky;top:57px;z-index:29;background:#fbeeea;border-left:4px solid var(--alert);padding:8px 18px;font-size:12.5px"></div>
+<div class="mobile-tabs" id="mobileTabs" role="tablist" aria-label="Visualização do documento">
+  <button class="mobile-tab active" id="tab-form" role="tab" aria-selected="true" aria-controls="form" onclick="switchTab('form')"><span aria-hidden="true">📝</span>&nbsp;Formulário</button>
+  <button class="mobile-tab" id="tab-prev" role="tab" aria-selected="false" aria-controls="docPreview" onclick="switchTab('prev')"><span aria-hidden="true">👁</span>&nbsp;Visualização</button>
+</div>
+<div id="painelValidacao" style="display:none;position:sticky;z-index:29;background:#fbeeea;border-left:4px solid var(--alert);padding:8px 18px;font-size:12.5px"></div>
 
 <div class="shell">
 <form class="panel" id="form" oninput="render()" onchange="render()" onsubmit="return false">
@@ -313,7 +401,7 @@ input[type=range]{width:100%;accent-color:var(--seal)}
     <div class="body">
       <div class="row r2">
         <div><label>Foro da comarca de</label><input type="text" id="f_foro" value="São Paulo - SP"></div>
-        <div><label>Nº de vias</label><input type="number" min="1" id="f_vias" value="2"></div>
+        <div><label>Nº de vias</label><input type="number" min="1" id="f_vias" value="2"><small style="color:var(--ink-2);font-size:10px">Altera só o texto do fecho. O PDF gera uma única cópia; imprima em duplicata manualmente.</small></div>
       </div>
       <div class="row r2">
         <div><label>Local da assinatura</label><input type="text" id="f_local" value="São Paulo"></div>
@@ -338,32 +426,8 @@ input[type=range]{width:100%;accent-color:var(--seal)}
     </div>
   </details>
 
-  <details class="group">
-    <summary><span class="num">10</span> Google Drive</summary>
-    <div class="body">
-      <div class="status" id="g_status">Não conectado.</div>
-      <div class="row"><div><label>Client ID do Google (OAuth)</label>
-        <input type="text" id="g_clientid" placeholder="000000000000-xxxxxxxx.apps.googleusercontent.com"></div></div>
-      <p class="hint">Passo a passo no README. O app só enxerga os arquivos que ele mesmo cria no seu Drive.</p>
-      <div class="row r2">
-        <div><button type="button" class="btn small" style="width:100%" onclick="conectarDrive()">Conectar</button></div>
-        <div><button type="button" class="btn small" style="width:100%" onclick="desconectarDrive()">Desconectar</button></div>
-      </div>
-      <div class="row r3">
-        <div><button type="button" class="btn small" style="width:100%" onclick="salvarDrive()">Salvar acordo no Drive</button></div>
-        <div><button type="button" class="btn small" style="width:100%" onclick="salvarWordDrive()">Enviar Word ao Drive</button></div>
-        <div><button type="button" class="btn small" style="width:100%" onclick="salvarPdfDrive()">Salvar PDF no Drive</button></div>
-      </div>
-      <div class="row r21">
-        <div><label>Acordos salvos</label><select id="g_arquivos"><option value="">— atualize a lista —</option></select></div>
-        <div style="align-self:end"><button type="button" class="btn small" style="width:100%" onclick="listarDrive()">Atualizar</button></div>
-      </div>
-      <button type="button" class="btn small" onclick="abrirDrive()">Abrir o selecionado</button>
-    </div>
-  </details>
-
   <details class="group" ontoggle="if(this.open) atualizarSignatarios()">
-    <summary><span class="num">11</span> Assinatura Digital</summary>
+    <summary><span class="num">10</span> Assinatura Digital</summary>
     <div class="body">
       <div class="status" id="ass_status">Verificando configuração…</div>
       <div class="row">
@@ -373,6 +437,10 @@ input[type=range]{width:100%;accent-color:var(--seal)}
       <div class="check">
         <input type="checkbox" id="op_whatsapp">
         <span>Enviar link por WhatsApp (ZapSign) <small style="display:block">Custo: R$ 0,50 por signatário. Padrão desligado — envie o link manualmente pelo WhatsApp de graça.</small></span>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="op_credora_assina" onchange="atualizarSignatarios()">
+        <span>Credora assina eletronicamente <small style="display:block">Quando marcado, o representante da credora recebe link de assinatura via ZapSign. Desmarque para assinatura física do colégio.</small></span>
       </div>
       <div class="row">
         <div>
@@ -391,7 +459,7 @@ input[type=range]{width:100%;accent-color:var(--seal)}
   </details>
 </form>
 
-<main class="stage"><div class="page" id="doc"></div></main>
+<main class="stage" id="docPreview"><div class="page" id="doc"></div></main>
 </div>
 <div id="toast"></div>
 
@@ -405,7 +473,7 @@ const val = id => ($(id) ? String($(id).value).trim() : '');
 const num = id => { const v=parseFloat(($(id)||{}).value); return isNaN(v)?0:v; };
 const chk = id => !!($(id)&&$(id).checked);
 const money = v => 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const bold = s => s.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
 const MESES=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 
@@ -571,7 +639,7 @@ async function fazerLogin(e){
   try{
     const r=await fetch('/api/login',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({senha:$('loginSenha').value})});
+      body:JSON.stringify({email:$('loginEmail').value, senha:$('loginSenha').value})});
     const d=await r.json();
     if(!r.ok) throw new Error(d.error||'Falha no login.');
     sessionStorage.setItem('ger_jwt',d.token);
@@ -579,6 +647,11 @@ async function fazerLogin(e){
     $('loginSenha').value='';
     toast('Acesso autorizado.');
     verificarAssinatura();
+    $('btnVerAcordos').style.display='';
+    $('btnDashboard').style.display='';
+    $('btnVencidas').style.display='';
+    $('btnImportar').style.display='';
+    _gerarChaveIdempotencia(); // nova sessão de formulário ao fazer login
   }catch(err){
     $('loginErro').textContent=err.message;
     $('loginErro').style.display='';
@@ -733,10 +806,9 @@ const CAMPOS_FORMULARIO=new Set([
   'op_timbre','op_marca','op_marcaop','t_linha1','t_texto','t_rodape',
   // Seção 09 — Fechamento
   'f_foro','f_vias','f_local','f_data','op_datavazia','t1_nome','t1_cpf','t2_nome','t2_cpf','f_titulo',
-  // Seção 10 — Google Drive
-  'g_clientid',
+  // Seção 10 — Google Drive removida (fluxo OAuth substituído por SA no servidor)
   // Seção 11 — Assinatura
-  'ass_msg','op_whatsapp','op_assinatura_eletronica'
+  'ass_msg','op_whatsapp','op_credora_assina','op_assinatura_eletronica'
 ]);
 
 /* ---------- listas dinâmicas ---------- */
@@ -1087,18 +1159,22 @@ function buildDoc(){
   const vias=Math.max(1,Math.floor(num('f_vias'))||2);
   const modoElet=chk('op_assinatura_eletronica');
   if(modoElet){
-    // Fecho eletrônico (art. 784, §4º, CPC — Lei 14.620/2023)
-    h+=`<p style="margin-top:14px">E, por estarem assim justos e contratados, firmam as partes o presente instrumento por assinatura eletrônica, cuja autoria e integridade podem ser verificadas no relatório de assinaturas que o integra, dispensada a presença de testemunhas na forma do art. 784, §4º, do Código de Processo Civil.</p>`;
+    // Fecho eletrônico — revisado juridicamente em 2026-08
+    h+=`<p style="margin-top:14px">E, por estarem assim justos e contratados, firmam as partes o presente instrumento por assinatura eletrônica, cuja integridade é conferida pela plataforma de assinatura digital utilizada, dispensada a assinatura de testemunhas na forma do art. 784, §4º, do Código de Processo Civil (Lei nº 14.620/2023). A autenticidade pode ser verificada no portal da plataforma pelo código de autenticação do documento.</p>`;
   }else{
-    // Fecho físico padrão
-    h+=`<p style="margin-top:14px">E, por estarem assim justos e acordados, assinam o presente instrumento em ${String(vias).padStart(2,'0')} (${extF(vias)}) vias de igual teor e forma, na presença de 02 (duas) testemunhas.</p>`;
+    // Fecho físico — revisado juridicamente em 2026-08
+    // art. 784, III: documentos particulares assinados pelo devedor e por 2 testemunhas
+    // NÃO citar §1º (trata da propositura de ação, não de testemunhas ou vias)
+    h+=`<p style="margin-top:14px">E, por estarem assim justos e acordados, assinam o presente instrumento em ${String(vias).padStart(2,'0')} (${extF(vias)}) vias de igual teor e forma, na presença de 02 (duas) testemunhas, constituindo título executivo extrajudicial nos termos do art. 784, III, do Código de Processo Civil.</p>`;
   }
   const fd=parseDate(val('f_data'));
   h+=`<p style="text-align:center;margin-top:22px">${esc(val('f_local'))}, ${(!chk('op_datavazia')&&fd)?extDate(fd):'______ de __________________ de '+(fd?fd.getFullYear():new Date().getFullYear())}.</p>`;
 
   const sign=(nome,papel,ancora)=>`<div class="sign">${ancora?`<span class="sign-anchor">${esc(ancora)}</span>`:''}<div class="line"></div><div class="who">${esc(nome)}</div><div class="role">${esc(papel)}</div></div>`;
-  credoras.forEach((c,i)=>{ h+=sign(c.nome,'Credora'+(c.rep?' — '+c.rep:''),`<<credora${i+1}>>`); });
-  devedores.forEach((d,i)=>{ h+=sign(d.nome,'Devedor(a)'+(md?' Solidário(a)':''),`<<devedor${i+1}}>>`); });
+  const credoraAssina=modoElet&&chk('op_credora_assina');
+  h+='<div class="assinaturas">';
+  credoras.forEach((c,i)=>{ h+=sign(c.nome,'Credora'+(c.rep?' — '+c.rep:''),credoraAssina?`<<credora${i+1}>>`:null); });
+  devedores.forEach((d,i)=>{ h+=sign(d.nome,'Devedor(a)'+(md?' Solidário(a)':''),modoElet?`<<devedor${i+1}>>`:null); });
   const t1=val('t1_nome'),t2=val('t2_nome'),c1=val('t1_cpf'),c2=val('t2_cpf');
   const temTest=t1||t2||c1||c2;
   if(!modoElet){
@@ -1108,14 +1184,16 @@ function buildDoc(){
     <p>2. Nome: ${esc(t2)||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(c2)||'____________________'}</p></div>`;
   }else if(temTest){
     // Eletrônico com testemunhas preenchidas: exibir (escolha do usuário)
-    h+=`<div class="wit"><p class="lbl">Testemunhas (opcional):</p>
+    h+=`<div class="wit"><p class="lbl">Testemunhas:</p>
     <p>1. Nome: ${esc(t1)||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(c1)||'____________________'}</p>
     <p>2. Nome: ${esc(t2)||'_________________________________'} &nbsp;&nbsp; CPF: ${esc(c2)||'____________________'}</p></div>`;
   }else{
     // Eletrônico sem testemunhas: nota de dispensa no documento
-    h+=`<div class="wit" style="font-size:10pt;color:#555"><p>Testemunhas dispensadas na forma do art. 784, §4º, do Código de Processo Civil — documento assinado eletronicamente com verificação de integridade.</p></div>`;
+    h+=`<div class="wit" style="font-size:10pt;color:#555"><p>A presença de testemunhas é dispensada nos termos do art. 784, §4º, do Código de Processo Civil (Lei nº 14.620/2023).</p></div>`;
   }
 
+  
+  h+='</div>'; // .assinaturas
   return marcaHtml()+timbreHtml(T)+`<div class="sheet">${h}</div>`;
 }
 
@@ -1198,6 +1276,7 @@ function render(){
   }
 
   $('doc').innerHTML=buildDoc();
+  scheduleAutosave();
 }
 
 /* ================= validação pré-exportação ================= */
@@ -1227,87 +1306,79 @@ function validarExportacao(){
   if(!_planoAtual) _planoAtual=plano();
   const p=_planoAtual;
   const erros=[], avisos=[];
+  const e=(msg,secao,campo=null)=>({msg,secao,campo});
+  const a=(msg,secao,campo=null)=>({msg,secao,campo});
 
-  // Aritmética de parcelas
-  if(p.erro) erros.push('Parcelamento: '+p.erro);
-  else if(!p.aritmOk) erros.push('A soma das parcelas não fecha com o total confessado. Corrija na seção 05.');
+  if(p.erro) erros.push(e('Parcelamento: '+p.erro,'05','p_modo'));
+  else if(!p.aritmOk) erros.push(e('A soma das parcelas não fecha com o total confessado.','05','p_data1'));
 
-  // Credoras múltiplas: soma deve bater com o total
   if(credoras.length>1){
     const somaCredCts=credoras.reduce((s,c)=>s+strToCents(c.valor),0);
     const totalCts=inputCents('d_total');
     if(somaCredCts>0&&somaCredCts!==totalCts)
-      erros.push('Credoras: soma '+money(somaCredCts/100)+' ≠ total '+money(totalCts/100)+' — corrija na seção 01.');
+      erros.push(e('Credoras: soma '+money(somaCredCts/100)+' ≠ total '+money(totalCts/100)+'.','01','d_total'));
   }
 
-  // P1.9 — Desconto não pode superar original + encargos
   {
     const descCts=inputCents('d_desconto');
     const origCts=inputCents('d_original');
     const encCts2=inputCents('d_encargos');
     if(descCts>0&&(origCts+encCts2)>0&&descCts>origCts+encCts2)
-      erros.push('Desconto ('+money(descCts/100)+') maior que original + encargos ('+money((origCts+encCts2)/100)+'). Corrija na seção 04.');
+      erros.push(e('Desconto ('+money(descCts/100)+') maior que original + encargos ('+money((origCts+encCts2)/100)+').','04','d_desconto'));
   }
 
-  // P1.9 + P1.3 — CPF, CEP e qualificação dos devedores
   if(devedores.length>0){
     const cpfs=new Set();
     devedores.forEach((d,i)=>{
       const lbl='Devedor '+(i+1)+(d.nome?' ('+d.nome+')':'');
-      // CPF
       if(!d.cpf){
-        avisos.push(lbl+': CPF ausente — obrigatório para título executivo (art. 784, III, CPC).');
+        erros.push(e(lbl+': CPF ausente — obrigatório para título executivo (art. 784, III, CPC).','02'));
       }else if(!validarCPF(d.cpf)){
-        avisos.push(lbl+': CPF inválido (“'+d.cpf+'”) — verifique antes de exportar.');
+        erros.push(e(lbl+': CPF inválido ("'+d.cpf+'") — verifique antes de exportar.','02'));
       }else{
         const limpo=d.cpf.replace(/\D/g,'');
-        if(cpfs.has(limpo)) avisos.push(lbl+': CPF duplicado entre devedores.');
+        if(cpfs.has(limpo)) avisos.push(a(lbl+': CPF duplicado entre devedores.','02'));
         else cpfs.add(limpo);
       }
-      // Endereço + CEP
       if(!d.end&&!d.cep)
-        avisos.push(lbl+': Endereço e CEP ausentes — obrigatórios para qualificação completa.');
+        erros.push(e(lbl+': Endereço e CEP ausentes — obrigatórios para qualificação completa.','02'));
       else if(!d.cep)
-        avisos.push(lbl+': CEP ausente — necessário para identificação do endereço.');
+        avisos.push(a(lbl+': CEP ausente — necessário para identificação do endereço.','02'));
     });
   }
   {
-    const dAssin  = (!chk('op_datavazia')&&val('f_data')) ? parseDate(val('f_data')) : null;
-    const temEntr = inputCents('p_entrada')>0;
-    const dEntr   = (temEntr&&val('p_entradadata')) ? parseDate(val('p_entradadata')) : null;
-    const dParc   = val('p_data1') ? parseDate(val('p_data1')) : null;
+    const dAssin=(!chk('op_datavazia')&&val('f_data'))?parseDate(val('f_data')):null;
+    const temEntr=inputCents('p_entrada')>0;
+    const dEntr=(temEntr&&val('p_entradadata'))?parseDate(val('p_entradadata')):null;
+    const dParc=val('p_data1')?parseDate(val('p_data1')):null;
     if(temEntr&&!dEntr)
-      avisos.push('Há entrada cadastrada sem data de vencimento — preencha na seção 05.');
+      avisos.push(a('Há entrada cadastrada sem data de vencimento.','05','p_entradadata'));
     if(dParc){
       if(dEntr&&dEntr>dParc)
-        erros.push('Vencimento da entrada ('+fmtDate(dEntr)+') é posterior à 1ª parcela ('+fmtDate(dParc)+'). Corrija na seção 05.');
+        erros.push(e('Vencimento da entrada ('+fmtDate(dEntr)+') é posterior à 1ª parcela ('+fmtDate(dParc)+').','05','p_entradadata'));
       if(dAssin&&dEntr&&dAssin>dEntr)
-        avisos.push('Data de assinatura ('+fmtDate(dAssin)+') é posterior ao vencimento da entrada ('+fmtDate(dEntr)+'). Verifique.');
+        avisos.push(a('Data de assinatura ('+fmtDate(dAssin)+') é posterior ao vencimento da entrada ('+fmtDate(dEntr)+').','09','f_data'));
       else if(dAssin&&!dEntr&&dAssin>dParc)
-        avisos.push('Data de assinatura ('+fmtDate(dAssin)+') é posterior à 1ª parcela ('+fmtDate(dParc)+'). Verifique.');
+        avisos.push(a('Data de assinatura ('+fmtDate(dAssin)+') é posterior à 1ª parcela ('+fmtDate(dParc)+').','09','f_data'));
     }
   }
 
-  // P1.6 — Validação de CNPJ/CPF e unicidade entre credoras
   if(credoras.length>0){
     const docs=new Set();
     credoras.forEach((c,i)=>{
       const lbl='Credora '+(i+1)+(c.nome?' ('+c.nome+')':'');
       if(c.doc){
         if(!validarDocumento(c.doc,c.tipo))
-          erros.push(lbl+': CNPJ/CPF inválido (“'+c.doc+'”) — verifique o dígito verificador.');
+          erros.push(e(lbl+': CNPJ/CPF inválido ("'+c.doc+'") — verifique o dígito verificador.','01'));
         else{
           const limpo=c.doc.replace(/\D/g,'');
-          if(docs.has(limpo)) erros.push(lbl+': CNPJ/CPF duplicado entre credoras.');
+          if(docs.has(limpo)) erros.push(e(lbl+': CNPJ/CPF duplicado entre credoras.','01'));
           else docs.add(limpo);
         }
       }
     });
   }
 
-  // Tokens: validar sobre o HTML final exportado.
-  // wordHtml() aplica subst() em cabeçalho, rodapé e título (C1) —
-  // a validação cobre todos os caminhos de exportação.
   const html=wordHtml();
   const T=tokens();
   const validos=new Set([
@@ -1315,31 +1386,69 @@ function validarExportacao(){
     'tabelaParcelas','listaParcelas','demonstrativo','divisaoCredito'
   ]);
   const{erros:errosToken,avisos:avisosToken}=classificarTokensNoHTML(html,validos);
-  erros.push(...errosToken);
-  avisos.push(...avisosToken);
+  erros.push(...errosToken.map(msg=>e(msg,'08')));
+  avisos.push(...avisosToken.map(msg=>a(msg,'08')));
 
-  // Tokens válidos com valor vazio usados em cláusulas ativas (avisos não bloqueantes)
   const textoAtivo=clausulas.filter(c=>c.on).map(c=>c.titulo+'\n'+c.texto).join('\n');
   Object.entries(T).forEach(([k,v])=>{
     if(k==='__refs'||v!=='') return;
     if(textoAtivo.includes('{{'+k+'}}'))
-      avisos.push('{{'+k+'}} está vazio — verifique se a frase ficará natural sem ele.');
+      avisos.push(a('{{'+k+'}} está vazio — verifique se a frase ficará natural sem ele.','08'));
   });
 
   return{erros,avisos,html};
+}
+// P1.8: secaoDoErro removida — erros devem ser {msg,secao,campo} via helper e()/a()
+// Se receber string, loga erro para detectar validacoes sem secao declarada
+function secaoDoErro(x){
+  if(typeof x==='string'||!x||typeof x.secao==='undefined'){
+    console.error('[P1.8] erro sem {secao} passado ao painel:',typeof x==='string'?x.slice(0,80):(x&&x.msg||x));
+    return typeof x==='object'&&x?x.secao||null:null;
+  }
+  return x.secao||null;
+}
+// P1.8: abre a seção e rola até ela; em mobile, garante que a aba de formulário está ativa
+function irParaSecao(num){
+  if(window.innerWidth<=900&&typeof switchTab==='function') switchTab('form');
+  const sections=document.querySelectorAll('details.group');
+  for(const s of sections){
+    const n=s.querySelector('.num');
+    if(n&&n.textContent.trim()===String(num).padStart(2,'0')){
+      s.open=true;
+      setTimeout(()=>{
+        s.scrollIntoView({behavior:'smooth',block:'start'});
+        const inp=s.querySelector('input:not([type=hidden]),select,textarea');
+        if(inp) setTimeout(()=>inp.focus(),300);
+      },60);
+      break;
+    }
+  }
 }
 function mostrarPainelValidacao(erros,avisos){
   const p=$('painelValidacao'); if(!p) return;
   if(!erros.length&&!avisos.length){ p.style.display='none'; return; }
   p.style.display='';
+  const obj=x=>{
+      if(typeof x!=='object'||!x||typeof x.msg==='undefined'){
+        console.error('[P1.8] item sem msg/secao no painel:',x);
+        return{msg:typeof x==='string'?x:'(erro sem mensagem)',secao:null,campo:null};
+      }
+      return x;
+    };
+  const link=(x)=>{
+    const s=obj(x).secao;
+    return s?' <a href="#" style="font-size:11px;color:var(--alert)" onclick="irParaSecao(''+s+'');return false">ver →</a>':'';
+  };
+  const es=erros.map(obj),as=avisos.map(obj);
   p.innerHTML=
-    (erros.length?'<strong>Exportação bloqueada:</strong><br>':'')
-    +erros.map(e=>`<span style="color:var(--alert)">⛔ ${esc(e)}</span>`).join('<br>')
-    +(erros.length&&avisos.length?'<br>':'')
-    +(avisos.length&&!erros.length?'<strong style="color:#6b4c00">Avisos:</strong><br>':'')
-    +avisos.map(a=>`<span style="color:#6b4c00">⚠ ${esc(a)}</span>`).join('<br>')
-    +`<button onclick="$('painelValidacao').style.display='none'" `
-    +`style="float:right;background:none;border:none;cursor:pointer;font-size:16px;color:inherit" title="Fechar">✕</button>`;
+    (es.length?'<strong>Exportação bloqueada:</strong><br>':'')
+    +es.map(x=>'<span style="color:var(--alert)">⛔ '+esc(x.msg)+'</span>'+link(x)).join('<br>')
+    +(es.length&&as.length?'<br>':'')
+    +(as.length&&!es.length?'<strong style="color:#6b4c00">Avisos:</strong><br>':'')
+    +as.map(x=>'<span style="color:#6b4c00">⚠ '+esc(x.msg)+'</span>'+link(x)).join('<br>')
+    +'<button onclick="$('painelValidacao').style.display='none'" '
+    +'style="float:right;background:none;border:none;cursor:pointer;font-size:16px;color:inherit" title="Fechar">✕</button>';
+  if(es.length>0&&es[0].secao) setTimeout(()=>irParaSecao(es[0].secao),80);
 }
 // Ponto único de entrada antes de qualquer exportação de documento.
 // Retorna {ok, html} onde html é o wordHtml() já gerado (reaproveitado).
@@ -1404,17 +1513,160 @@ function nomeArquivo(ext){
   return `Acordo-${d}-${new Date().toISOString().slice(0,10)}.${ext}`;
 }
 function exportWord(){
-  const{ok,html}=podeExportar(); if(!ok) return;
-  try{ baixar(new Blob(['\ufeff'+html],{type:'application/msword'}),nomeArquivo('doc'));
-       toast('Word gerado. Abra e salve como .docx se quiser.'); }
-  catch(e){ abrirNovaAba(html); }
+  const{ok}=podeExportar(); if(!ok) return;
+  toast('Gerando DOCX…');
+  gerarDocxBlob()
+    .then(blob=>{ baixar(blob,nomeArquivo('docx')); toast('DOCX gerado! Abre sem alerta no Word e Google Docs.'); })
+    .catch(e=>{ console.error('[docx]',e); abrirNovaAba(); });
+}
+
+/* ================= P2.1: geração de .docx real (Office Open XML via JSZip) ================= */
+function _xmlEsc(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _inlineToRuns(el){
+  let r='';
+  for(const n of el.childNodes){
+    if(n.nodeType===3){const t=n.textContent;if(t)r+=`<w:r><w:t xml:space="preserve">${_xmlEsc(t)}</w:t></w:r>`;}
+    else if(n.nodeType===1){
+      const tag=n.tagName.toLowerCase();
+      if(tag==='b'||tag==='strong'){
+        for(const x of n.childNodes)
+          if(x.nodeType===3&&x.textContent)
+            r+=`<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${_xmlEsc(x.textContent)}</w:t></w:r>`;
+      }else if(tag==='span'&&(n.className==='sign-anchor')){}
+      else r+=_inlineToRuns(n);
+    }
+  }
+  return r;
+}
+function _tableToOoxml(el){
+  const rows=el.querySelectorAll('tr');
+  const nCols=rows[0]?rows[0].querySelectorAll('td,th').length:1;
+  const cw=Math.round(9072/nCols);
+  let x=`<w:tbl><w:tblPr><w:tblW w:w="9072" w:type="dxa"/><w:jc w:val="center"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="808080"/><w:left w:val="single" w:sz="4" w:space="0" w:color="808080"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="808080"/><w:right w:val="single" w:sz="4" w:space="0" w:color="808080"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="808080"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="808080"/></w:tblBorders></w:tblPr><w:tblGrid>${Array(nCols).fill(`<w:gridCol w:w="${cw}"/>`).join('')}</w:tblGrid>`;
+  for(const row of rows){
+    x+='<w:tr>';
+    for(const cell of row.querySelectorAll('td,th')){
+      const isHdr=cell.tagName==='TH';
+      const cls=cell.className||'';
+      const jc=cls.includes('n')?'center':cls.includes('v')?'right':'left';
+      const span=parseInt(cell.getAttribute('colspan')||'1');
+      x+=`<w:tc><w:tcPr>${span>1?`<w:gridSpan w:val="${span}"/>`:''}${isHdr?'<w:shd w:val="clear" w:color="auto" w:fill="EDE4D3"/>':''}</w:tcPr><w:p><w:pPr><w:jc w:val="${jc}"/></w:pPr><w:r>${isHdr?'<w:rPr><w:b/><w:sz w:val="17"/></w:rPr>':'<w:rPr><w:sz w:val="18"/></w:rPr>'}<w:t xml:space="preserve">${_xmlEsc(cell.textContent.trim())}</w:t></w:r></w:p></w:tc>`;
+    }
+    x+='</w:tr>';
+  }
+  return x+'</w:tbl><w:p/>';
+}
+function _signToOoxml(el){
+  const who=el.querySelector('.who'),role=el.querySelector('.role');
+  const n=who?_xmlEsc(who.textContent.trim()):'',r=role?_xmlEsc(role.textContent.trim()):'';
+  return `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="1440" w:after="80"/><w:pBdr><w:bottom w:val="single" w:sz="4" w:space="4" w:color="000000"/></w:pBdr><w:ind w:left="1440" w:right="1440"/></w:pPr></w:p>${n?`<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="0"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>${n}</w:t></w:r></w:p>`:''}${r?`<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="200"/></w:pPr><w:r><w:t>${r}</w:t></w:r></w:p>`:''}`;
+}
+function _nodeToOoxml(el){
+  const tag=el.tagName?.toLowerCase();if(!tag)return'';
+  switch(tag){
+    case 'h1':return`<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="200" w:line="360" w:lineRule="auto"/></w:pPr>${_inlineToRuns(el)}</w:p>`;
+    case 'h2':return`<w:p><w:pPr><w:spacing w:before="200" w:after="80" w:line="360" w:lineRule="auto"/></w:pPr>${_inlineToRuns(el)}</w:p>`;
+    case 'p':{
+      const cls=el.className||'',sty=el.getAttribute('style')||'';
+      const jc=sty.includes('center')?'center':'both';
+      const ind=cls.includes('bul')?'<w:ind w:left="360" w:hanging="200"/>':'';
+      return`<w:p><w:pPr><w:jc w:val="${jc}"/>${ind}<w:spacing w:line="360" w:lineRule="auto" w:before="0" w:after="160"/></w:pPr>${_inlineToRuns(el)}</w:p>`;
+    }
+    case 'table':return _tableToOoxml(el);
+    case 'div':{
+      const cls=el.className||'';
+      if(cls.includes('sign'))return _signToOoxml(el);
+      let o='';for(const c of el.children)o+=_nodeToOoxml(c);return o;
+    }
+    default:return'';
+  }
+}
+function _domToOoxml(rootEl){
+  const clone=rootEl.cloneNode(true);
+  clone.querySelectorAll('.lh-header,.lh-footer,.lh-mark,.sign-anchor').forEach(e=>e.remove());
+  let o='';for(const c of clone.children)o+=_nodeToOoxml(c);return o;
+}
+// Redimensiona o logo para max 4cm de largura (≈151px a 96dpi) para reduzir o DOCX
+async function _resizeLogo(maxPx){
+  if(typeof LOGO==='undefined'||!LOGO) return null;
+  return new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>{
+      const scale=Math.min(1,maxPx/img.naturalWidth);
+      const w=Math.round(img.naturalWidth*scale);
+      const h=Math.round(img.naturalHeight*scale);
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      const b64=c.toDataURL('image/png').replace(/^data:image/png;base64,/,'');
+      resolve({b64,w,h});
+    };
+    img.onerror=()=>resolve(null);
+    img.src=LOGO;
+  });
+}
+async function gerarDocxBlob(){
+  if(typeof JSZip==='undefined') throw new Error('JSZip n\u00e3o carregado.');
+  const T=tokens(),hasTimbra=chk('op_timbre');
+  const content=_domToOoxml($('doc'));
+  const WURI='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const RURI='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const PKURI='http://schemas.openxmlformats.org/package/2006/relationships';
+  const hdrRefs=hasTimbra?`<w:headerReference w:type="default" r:id="rId3"/><w:footerReference w:type="default" r:id="rId4"/>`:'';
+  const hdrDocRels=hasTimbra?`<Relationship Id="rId3" Type="${RURI}/header" Target="header1.xml"/><Relationship Id="rId4" Type="${RURI}/footer" Target="footer1.xml"/>`:'';
+  const hdrOverrides=hasTimbra?`<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>`:'';
+  const zip=new JSZip();
+  zip.file('[Content_Types].xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>${hdrOverrides}</Types>`);
+  zip.file('_rels/.rels',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${PKURI}"><Relationship Id="rId1" Type="${RURI}/officeDocument" Target="word/document.xml"/></Relationships>`);
+  zip.file('word/_rels/document.xml.rels',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${PKURI}"><Relationship Id="rId1" Type="${RURI}/styles" Target="styles.xml"/><Relationship Id="rId2" Type="${RURI}/settings" Target="settings.xml"/>${hdrDocRels}</Relationships>`);
+  zip.file('word/styles.xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="${WURI}"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="23"/><w:szCs w:val="23"/><w:lang w:val="pt-BR"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:jc w:val="both"/><w:spacing w:line="360" w:lineRule="auto" w:after="160"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>`);
+  zip.file('word/settings.xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="${WURI}"><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`);
+  zip.file('word/document.xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:r="${RURI}" xmlns:w="${WURI}"><w:body>${content}<w:sectPr>${hdrRefs}<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1985" w:right="1080" w:bottom="1418" w:left="1080" w:header="709" w:footer="709" w:gutter="0"/></w:sectPr></w:body></w:document>`);
+  if(hasTimbra){
+    const _logoData=await _resizeLogo(151); // 151px ≈ 4cm a 96dpi
+    const l1=_xmlEsc(subst(val('t_linha1'),T));
+    const txt=subst(val('t_texto'),T).split(/\n/).filter(Boolean).map(l=>`<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="0"/></w:pPr><w:r><w:rPr><w:sz w:val="15"/></w:rPr><w:t>${_xmlEsc(l)}</w:t></w:r></w:p>`).join('');
+    const rod=_xmlEsc(subst(val('t_rodape'),T));
+    const WURI2='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    const RURI2='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+    const PKURI2='http://schemas.openxmlformats.org/package/2006/relationships';
+
+    if(_logoData){
+      // Logo disponível: adicionar PNG + relação + drawing no header
+      const pngBytes=Uint8Array.from(atob(_logoData.b64),c=>c.charCodeAt(0));
+      zip.file('word/media/logo.png',pngBytes,{binary:true});
+      zip.file('word/_rels/header1.xml.rels',
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${PKURI2}"><Relationship Id="rId1" Type="${RURI2}/image" Target="media/logo.png"/></Relationships>`);
+      const wEmu=Math.round(_logoData.w*9525), hEmu=Math.round(_logoData.h*9525);
+      const APFX='http://schemas.openxmlformats.org/drawingml/2006/';
+      const drawing=`<w:r><w:drawing><wp:inline xmlns:wp="${APFX}wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${wEmu}" cy="${hEmu}"/><wp:docPr id="1" name="Logo"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="${APFX}main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="${APFX}main"><a:graphicData uri="${APFX}picture"><pic:pic xmlns:pic="${APFX}picture"><pic:nvPicPr><pic:cNvPr id="0" name="logo.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${wEmu}" cy="${hEmu}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+      zip.file('word/header1.xml',
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr xmlns:w="${WURI2}" xmlns:r="${RURI2}"><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="0"/></w:pPr>${drawing}</w:p><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="0"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="16"/></w:rPr><w:t>${l1}</w:t></w:r></w:p>${txt}<w:p><w:pPr><w:spacing w:before="40" w:after="40"/><w:pBdr><w:top w:val="double" w:sz="6" w:space="4" w:color="9A9A9A"/><w:bottom w:val="double" w:sz="6" w:space="4" w:color="9A9A9A"/></w:pBdr></w:pPr></w:p></w:hdr>`);
+    }else{
+      // Sem logo: header só com texto
+      zip.file('word/header1.xml',
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr xmlns:w="${WURI2}"><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="0"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="16"/></w:rPr><w:t>${l1}</w:t></w:r></w:p>${txt}<w:p><w:pPr><w:spacing w:before="40" w:after="40"/><w:pBdr><w:top w:val="double" w:sz="6" w:space="4" w:color="9A9A9A"/><w:bottom w:val="double" w:sz="6" w:space="4" w:color="9A9A9A"/></w:pBdr></w:pPr></w:p></w:hdr>`);
+    }
+    zip.file('word/footer1.xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr xmlns:w="${WURI2}"><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="40" w:after="0"/><w:pBdr><w:top w:val="double" w:sz="6" w:space="4" w:color="9A9A9A"/></w:pBdr></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Garamond"/><w:i/><w:color w:val="7A4A1C"/><w:sz w:val="22"/></w:rPr><w:t>${rod}</w:t></w:r></w:p></w:ftr>`);
+  }
+  return zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
 }
 function printPdf(){
-  const{ok,html}=podeExportar(); if(!ok) return;
-  try{ window.print(); }catch(e){ abrirNovaAba(html); }
+  const{ok}=podeExportar(); if(!ok) return;
+  // Safari não repete position:fixed em print; redirecionar para html2pdf (Chromium)
+  if(/^((?!chrome|android).)*safari/i.test(navigator.userAgent)){
+    toast('Safari: gerando PDF para download (cabeçalho garantido em todas as páginas)…');
+    baixarPdf();
+    return;
+  }
+  try{ window.print(); }catch(e){ abrirNovaAba(); }
 }
-function abrirNovaAba(html){
-  html=html||wordHtml();
+function abrirNovaAba(){
+  // Sempre revalida — é o caminho de erro, o html anterior pode estar desatualizado
+  const{ok,html}=podeExportar();
+  if(!ok) return;
   const w=window.open('','_blank');
   if(!w){ toast('Permita pop-ups para abrir o documento em nova aba.'); return; }
   w.document.write(html); w.document.close();
@@ -1442,130 +1694,9 @@ function aplicarDados(d){
   drawLists(); render();
 }
 
-/* ---------- Google Drive ---------- */
-let gToken=null, gFolder=null, gArquivoId=null, gTokenExpiry=null;
-const PASTA='Acordos - Gerador';
-function ls(k,v){ try{ if(v===undefined) return localStorage.getItem('ger_'+k); localStorage.setItem('ger_'+k,v); }catch(e){ return null; } }
-function statusDrive(txt,estado=''){
-  const el=$('g_status'); if(!el) return;
-  el.innerHTML=txt;
-  el.className='status'+(estado?' '+estado:'');
-}
-function conectarDrive(){
-  const cid=val('g_clientid');
-  if(!cid) return toast('Informe o Client ID do Google.');
-  if(!(window.google&&google.accounts&&google.accounts.oauth2)){
-    statusDrive('Biblioteca do Google não carregou. O app precisa estar publicado em HTTPS para usar autenticação Google.','erro');
-    return;
-  }
-  ls('cid',cid);
-  statusDrive('Aguardando autorização…','aviso');
-  google.accounts.oauth2.initTokenClient({
-    client_id:cid,
-    scope:'https://www.googleapis.com/auth/drive.file',
-    error_callback:e=>{
-      if(e.type==='popup_failed_to_open'||e.type==='popup_closed'){
-        statusDrive('Janela de autorização bloqueada ou fechada. Permita pop-ups deste site e tente novamente.','erro');
-      }else{
-        statusDrive('Erro de autenticação: '+(e.type||'desconhecido'),'erro');
-      }
-    },
-    callback:r=>{
-      if(r.error){
-        statusDrive('Falha na autorização: '+(r.error_description||r.error),'erro');
-        return toast('Autorização negada.');
-      }
-      gToken=r.access_token;
-      gTokenExpiry=Date.now()+((r.expires_in||3600)*1000-60000);
-      statusDrive('Conectado ao Google Drive — pasta <b>'+PASTA+'</b>','ok');
-      listarDrive();
-    }
-  }).requestAccessToken();
-}
-function desconectarDrive(){
-  gToken=null; gFolder=null; gArquivoId=null; gTokenExpiry=null;
-  statusDrive('Não conectado.','');
-  toast('Desconectado.');
-}
-async function gApi(url,opts){
-  if(!gToken){
-    statusDrive('Não conectado ao Google Drive.','');
-    throw new Error('Conecte o Google Drive primeiro.');
-  }
-  if(gTokenExpiry&&Date.now()>gTokenExpiry){
-    gToken=null; gTokenExpiry=null;
-    statusDrive('Sessão expirada. Clique em Conectar para renovar.','expirado');
-    throw new Error('Sessão expirada. Clique em Conectar para renovar.');
-  }
-  opts=opts||{}; opts.headers=Object.assign({Authorization:'Bearer '+gToken},opts.headers||{});
-  const r=await fetch(url,opts);
-  // Tenta ler o corpo JSON do erro para incluir na mensagem
-  if(!r.ok){
-    let detalhe='';
-    try{ const b=await r.clone().json(); detalhe=b.error?.message||b.message||b.error||''; }catch(_){}
-    if(r.status===401){
-      gToken=null; gTokenExpiry=null;
-      statusDrive('Sessão expirada. Clique em Conectar para renovar.','expirado');
-      throw new Error('Sessão expirada. Clique em Conectar para renovar.');
-    }
-    if(r.status===403) throw new Error('Permissão negada pelo Google Drive'+(detalhe?' — '+detalhe:' (HTTP 403).'));
-    if(r.status===404) throw new Error('Arquivo ou pasta não encontrado no Drive'+(detalhe?' — '+detalhe:' (HTTP 404).'));
-    throw new Error('Erro HTTP '+r.status+' ao acessar o Google Drive'+(detalhe?' — '+detalhe:'.'));
-  }
-  return r;
-}
-async function pastaDrive(){
-  if(gFolder) return gFolder;
-  const q=encodeURIComponent("mimeType='application/vnd.google-apps.folder' and name='"+PASTA+"' and trashed=false");
-  const r=await (await gApi('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)')).json();
-  if(r.files&&r.files.length){ gFolder=r.files[0].id; return gFolder; }
-  const c=await (await gApi('https://www.googleapis.com/drive/v3/files',{method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:PASTA,mimeType:'application/vnd.google-apps.folder'})})).json();
-  gFolder=c.id; return gFolder;
-}
-async function enviarArquivo(nome,mime,conteudo,idExistente){
-  const meta={name:nome}; if(!idExistente) meta.parents=[await pastaDrive()];
-  const limite='-------gerador'+Date.now();
-  const corpo='--'+limite+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)
-    +'\r\n--'+limite+'\r\nContent-Type: '+mime+'\r\n\r\n'+conteudo+'\r\n--'+limite+'--';
-  const url='https://www.googleapis.com/upload/drive/v3/files'+(idExistente?'/'+idExistente:'')+'?uploadType=multipart&fields=id,name';
-  const r=await gApi(url,{method:idExistente?'PATCH':'POST',
-    headers:{'Content-Type':'multipart/related; boundary='+limite},body:corpo});
-  return (await r.json());
-}
-async function salvarDrive(){
-  if(!gToken) return toast('Conecte o Google Drive primeiro.');
-  try{
-    const nome=nomeArquivo('json');
-    const j=await enviarArquivo(nome,'application/json',JSON.stringify(coletarDados()),gArquivoId);
-    gArquivoId=j.id; toast('Salvo no Drive: '+j.name); listarDrive();
-  }catch(e){ toast('Não foi possível salvar: '+e.message); }
-}
-async function salvarWordDrive(){
-  if(!gToken) return toast('Conecte o Google Drive primeiro.');
-  const{ok,html}=podeExportar(); if(!ok) return;
-  try{ const j=await enviarArquivo(nomeArquivo('doc'),'application/msword',html);
-       toast('Word enviado ao Drive: '+j.name); }
-  catch(e){ toast('Não foi possível enviar: '+e.message); }
-}
-async function listarDrive(){
-  if(!gToken) return toast('Conecte o Google Drive primeiro.');
-  try{
-    const q=encodeURIComponent("'"+(await pastaDrive())+"' in parents and mimeType='application/json' and trashed=false");
-    const r=await (await gApi('https://www.googleapis.com/drive/v3/files?q='+q+'&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime)')).json();
-    $('g_arquivos').innerHTML=(r.files||[]).length
-      ? r.files.map(f=>`<option value="${f.id}">${f.name} — ${f.modifiedTime.slice(0,10)}</option>`).join('')
-      : '<option value="">— nenhum acordo salvo —</option>';
-  }catch(e){ toast('Não foi possível listar: '+e.message); }
-}
-async function abrirDrive(){
-  const id=val('g_arquivos'); if(!id) return toast('Selecione um arquivo.');
-  try{
-    const d=await (await gApi('https://www.googleapis.com/drive/v3/files/'+id+'?alt=media')).json();
-    gArquivoId=id; aplicarDados(d); toast('Acordo carregado do Drive.');
-  }catch(e){ toast('Não foi possível abrir: '+e.message); }
-}
+// Seção 10 (Google Drive OAuth) removida: o fluxo OAuth do cliente foi substituído
+// pela service account no servidor (api/assinatura/_drive.js).
+// PDFs assinados são guardados automaticamente via webhook ZapSign.
 
 function saveJson(){
   baixar(new Blob([JSON.stringify(coletarDados(),null,2)],{type:'application/json'}),nomeArquivo('json'));
@@ -1611,58 +1742,51 @@ async function baixarPdf(){
     toast('PDF gerado! Dica: use Imprimir/PDF para cabeçalho em todas as páginas.');
   }catch(e){ toast('Erro ao gerar PDF: '+e.message); }
 }
-async function salvarPdfDrive(){
-  if(!gToken) return toast('Conecte o Google Drive primeiro.');
-  const{ok}=podeExportar(); if(!ok) return;
-  toast('Gerando PDF para o Drive…');
-  try{
-    const blob=await html2pdf().set({
-      margin:0,
-      html2canvas:{scale:2,useCORS:true,scrollY:0},
-      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
-    }).from($('doc')).output('blob');
-    const nome=nomeArquivo('pdf');
-    const fid=await pastaDrive();
-    const form=new FormData();
-    form.append('metadata',new Blob([JSON.stringify({name:nome,parents:[fid]})],{type:'application/json'}));
-    form.append('file',blob,nome);
-    const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',
-      {method:'POST',headers:{Authorization:'Bearer '+gToken},body:form});
-    if(r.status===401){gToken=null;statusDrive('Sessão expirada — conecte novamente.');throw new Error('401');}
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const j=await r.json();
-    toast('PDF salvo no Drive: '+j.name);
-    listarDrive();
-  }catch(e){ toast('Não foi possível salvar PDF: '+e.message); }
-}
+
 
 /* ================= Assinatura Digital ================= */
 function atualizarSignatarios(){
   const box=$('ass_signers');
-  if(!box||!devedores.length){
-    if(box) box.innerHTML='<p class="hint">Adicione devedores na seção 02 para preencher automaticamente.</p>';
+  if(!box)return;
+  const credAssin=chk('op_credora_assina');
+  if(!devedores.length&&!credAssin){
+    box.innerHTML='<p class="hint">Adicione devedores na seção 02 para preencher automaticamente.</p>';
     return;
   }
-  // Preserva valores já digitados
-  const prev=devedores.map((_,i)=>({
+  const prevCred=credoras.map((_,i)=>(($('asn_cred_email'+i))||{}).value||'');
+  const prevDev=devedores.map((_,i)=>({
     email:(($('asn_email'+i))||{}).value||'',
     tel:  (($('asn_tel'+i))||{}).value||'',
   }));
-  box.innerHTML=devedores.map((d,i)=>{
-    const ep=prev[i].email||(d.contato&&d.contato.includes('@')?d.contato:'');
-    const tp=prev[i].tel  ||(d.contato&&!d.contato.includes('@')?d.contato.replace(/\D/g,''):'');
-    return '<div class="card" style="padding:8px 10px;margin-bottom:6px">'
-      +'<div class="card-head"><strong>Signatário '+(i+1)+'</strong></div>'
-      +'<div class="row r2">'
-      +'<div><label>Nome</label><input type="text" id="asn_nome'+i+'" value="'+esc(d.nome)+'"></div>'
-      +'<div><label>E-mail *</label><input type="email" id="asn_email'+i+'" value="'+esc(ep)+'" placeholder="obrigatório"></div>'
-      +'</div>'
-      +'<div class="row r3">'
-      +'<div><label>Telefone (WhatsApp)</label><input type="tel" id="asn_tel'+i+'" value="'+esc(tp)+'" placeholder="11999999999"></div>'
-      +'<div><label>CPF</label><input type="text" id="asn_cpf'+i+'" value="'+esc(d.cpf||'')+'"></div>'
-      +'<div><label>Papel</label><select id="asn_papel'+i+'"><option value="devedor">Devedor(a)</option><option value="testemunha">Testemunha</option></select></div>'
-      +'</div></div>';
-  }).join('');
+  let html='';
+  if(credAssin){
+    credoras.forEach((c,i)=>{
+      const ep=prevCred[i]||(c.email||'');
+      html+=`<div class="card" style="padding:8px 10px;margin-bottom:6px;border-left:3px solid var(--seal)">`
+        +`<div class="card-head"><strong>Credora ${i+1}: ${esc(c.nome||'')}</strong></div>`
+        +`<div class="row r2">`
+        +`<div><label>Nome do representante</label><input type="text" id="asn_cred_nome${i}" value="${esc(c.rep||c.nome||'')}"></div>`
+        +`<div><label>E-mail *</label><input type="email" id="asn_cred_email${i}" value="${esc(ep)}" placeholder="obrigatório"></div>`
+        +`</div></div>`;
+    });
+  }
+  devedores.forEach((d,i)=>{
+    const ep=prevDev[i].email||(d.contato&&d.contato.includes('@')?d.contato:'');
+    const tp=prevDev[i].tel  ||(d.contato&&!d.contato.includes('@')?d.contato.replace(/\D/g,''):'');
+    const seq=credAssin?credoras.length+i+1:i+1;
+    html+=`<div class="card" style="padding:8px 10px;margin-bottom:6px">`
+      +`<div class="card-head"><strong>Signatário ${seq}</strong></div>`
+      +`<div class="row r2">`
+      +`<div><label>Nome</label><input type="text" id="asn_nome${i}" value="${esc(d.nome)}"></div>`
+      +`<div><label>E-mail *</label><input type="email" id="asn_email${i}" value="${esc(ep)}" placeholder="obrigatório"></div>`
+      +`</div>`
+      +`<div class="row r3">`
+      +`<div><label>Telefone (WhatsApp)</label><input type="tel" id="asn_tel${i}" value="${esc(tp)}" placeholder="11999999999"></div>`
+      +`<div><label>CPF</label><input type="text" id="asn_cpf${i}" value="${esc(d.cpf||'')}"></div>`
+      +`<div><label>Papel</label><select id="asn_papel${i}"><option value="devedor">Devedor(a)</option><option value="testemunha">Testemunha</option></select></div>`
+      +`</div></div>`;
+  });
+  box.innerHTML=html;
 }
 // Busca endereço pelo CEP via ViaCEP (P1.3)
 async function buscarCEP(i){
@@ -1717,6 +1841,14 @@ async function gerarPDFBase64(){
 async function enviarAssinatura(){
   const{ok}=podeExportar(); if(!ok) return;
   const signatarios=[];
+  // Credora (se assina eletronicamente)
+  if(chk('op_credora_assina')){
+    credoras.forEach((_,i)=>{
+      const nome=($('asn_cred_nome'+i)||{}).value||'';
+      const email=($('asn_cred_email'+i)||{}).value||'';
+      if(email.trim()) signatarios.push({nome,email:email.trim(),telefone:'',papel:'credora',cpf:''});
+    });
+  }
   devedores.forEach((_,i)=>{
     const nome =($('asn_nome' +i)||{}).value||'';
     const email=($('asn_email'+i)||{}).value||'';
@@ -1779,11 +1911,848 @@ async function enviarAssinatura(){
 async function enviarAdobeSign(){ return enviarAssinatura(); }
 
 $('f_data').value=new Date().toISOString().slice(0,10);
-const cidSalvo=ls('cid'); if(cidSalvo) $('g_clientid').value=cidSalvo;
-loadExample();
 atualizarSignatarios();
 verificarAutenticacao();  // mostra modal se JWT ausente/expirado
+
+/* ================= Banco de dados (Fase E, Etapa 2) ================= */
+
+// Chave de idempotência: gerada ao abrir/limpar formulário, armazenada em
+// localStorage (sobrevive refresh). Permite que POST repetido devolva o
+// acordo já criado em vez de criar um segundo com número diferente.
+function _gerarChaveIdempotencia(){
+  const k=crypto.randomUUID();
+  localStorage.setItem('ger_idempotency_key',k);
+  localStorage.removeItem('ger_acordo_id');       // nova chave = nova sessão de formulário
+  localStorage.removeItem('ger_acordo_num');
+  return k;
+}
+function _getChaveIdempotencia(){ return localStorage.getItem('ger_idempotency_key')||_gerarChaveIdempotencia(); }
+
+function coletarAcordoParaBanco(){
+  const p=plano(), v=vencimentos(p);
+  return {
+    devedores: devedores.map((d,i)=>({
+      nome:d.nome, cpf:d.cpf, rg:d.rg||null, rgEmissor:d.rgEmissor||null,
+      nac:d.nac||null, civil:d.civil||null, prof:d.prof||null,
+      end:d.end||null, cep:d.cep||null, cid:d.cid||null,
+      email:d.email||null, tel:d.tel||null,
+      papel:devedores.length>1&&i>0?'solidario':'devedor', ordem:i+1
+    })),
+    credoras: credoras.map(c=>({
+      nome:c.nome, cnpj:c.doc||null, tipo:c.tipo||'pj',
+      end:c.end||null, cid:c.cid||null, uf:c.uf||null,
+      valorCts:c.valor?Math.round(parseFloat(c.valor)*100):null,
+      rep:c.rep||null, cargo:c.cargo||null
+    })),
+    alunos: alunos.map(a=>({ nome:a.nome, serie:a.serie||null, turno:a.turno||null, ra:a.ra||null })),
+    acordo: {
+      valorTotalCts:       p.totalCts,
+      entradaCts:          p.entradaCts,
+      nParcelas:           p.n,
+      valorParcelaCts:     p.parcelaCts,
+      dataPrimeiraParcela: val('p_data1')||null,
+      multaMoraPct:        num('e_multamora')||null,
+      jurosPct:            num('e_juros')||null,
+      multaPenalPct:       num('e_multapenal')||null,
+      honorariosPct:       num('e_honorarios')||null,
+      indiceCorrecao:      val('e_indice')||null,
+      origemDivida:        val('d_origem')||null,
+      periodoReferencia:   val('d_periodo')||null,
+      foro:                val('f_foro')||null,
+      modoAssinatura:      chk('op_assinatura_eletronica')?'eletronico':'fisico'
+    },
+    parcelas: v.map(par=>({
+      numero:par.n, vencimento:fmtAMD(par.data), valorPrevistoCts:Math.round(par.valor*100)
+    }))
+  };
+}
+
+async function salvarNoBanco(){
+  const btn=$('btnSalvarBanco');
+  if(btn){btn.disabled=true; btn.textContent='Salvando…';}
+  try{
+    const dados=coletarAcordoParaBanco();
+    const acordoId=localStorage.getItem('ger_acordo_id');
+    dados.idempotencyKey=_getChaveIdempotencia();    // servidor deduplica por esta chave
+    if(acordoId) dados._versao=localStorage.getItem('ger_acordo_versao')||'';  // concorrência
+    const url=acordoId?`/api/acordos/${acordoId}`:'/api/acordos';
+    const r=await fetch(url,{method:acordoId?'PUT':'POST',headers:apiHeaders(),body:JSON.stringify(dados)});
+    const d=await r.json();
+    if(r.status===409&&d.erro==='CPF_DIVERGENCIA'){mostrarDivergenciasCPF(d.divergencias,dados,acordoId);return;}
+    if(!r.ok) throw new Error(d.erro||`Erro ${r.status}`);
+    localStorage.setItem('ger_acordo_id',d.id);
+    localStorage.setItem('ger_acordo_num',d.numero||'');
+    if(d.atualizado_em) localStorage.setItem('ger_acordo_versao',d.atualizado_em);
+    const st=$('bancoStatus');
+    if(st){st.textContent=`Salvo como ${d.numero}`;st.style.color='var(--seal)';}
+    $('btnVerAcordos').style.display='';
+    toast(`Acordo salvo como ${d.numero}`);
+  }catch(err){
+    const m=err.message;
+    if(m.includes('503')||m.includes('Banco')){
+      toast('⚠ Banco indisponível — acordo não salvo. O PDF funciona normalmente.');
+    }else if(m.includes('401')){
+      toast('⚠ Sessão expirada. Faça login novamente.');
+      $('loginModal').style.display='';
+    }else{
+      toast('⚠ '+m);
+    }
+  }finally{
+    if(btn){btn.disabled=false; btn.textContent='Salvar no banco';}
+  }
+}
+
+function mostrarDivergenciasCPF(divs,dados,acordoIdAtual){
+  // Monta diálogo com diff lado a lado e três opções
+  let overlay=$('divCpfOverlay');
+  if(!overlay){
+    overlay=document.createElement('div');
+    overlay.id='divCpfOverlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(18,32,58,.88);z-index:300;display:flex;align-items:center;justify-content:center';
+    document.body.appendChild(overlay);
+  }
+  const linhas=divs.map(d=>`
+    <div style="margin-bottom:12px;border:1px solid var(--line);border-radius:var(--radius);padding:10px">
+      <strong>CPF ${d.cpf}</strong>
+      <table style="width:100%;font-size:12px;margin-top:6px;border-collapse:collapse">
+        <thead><tr><th style="text-align:left;padding:3px 6px;color:var(--ink-2)">Campo</th><th style="text-align:left;padding:3px 6px">No banco</th><th style="text-align:left;padding:3px 6px">No formulário</th></tr></thead>
+        <tbody>${d.diff.map(f=>`<tr style="border-top:1px solid var(--line)">
+          <td style="padding:3px 6px;color:var(--ink-2)">${f.label}</td>
+          <td style="padding:3px 6px">${f.antigo}</td>
+          <td style="padding:3px 6px;color:var(--seal)">${f.novo}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`).join('');
+  overlay.innerHTML=`<div style="background:var(--surface);border-radius:8px;width:min(620px,96vw);padding:24px;box-shadow:0 12px 48px rgba(0,0,0,.4)">
+    <h3 style="margin:0 0 12px">Dados divergentes no banco</h3>
+    <p style="font-size:13px;color:var(--ink-2);margin-bottom:16px">Os devedores abaixo já existem no banco com dados diferentes. Escolha uma ação para cada um:</p>
+    ${linhas}
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+      <button class="btn primary" onclick="_divCpfAcao('atualizar')">Atualizar banco com formulário</button>
+      <button class="btn" onclick="_divCpfAcao('manter')">Manter dados do banco</button>
+      <button class="btn ghost" onclick="_divCpfAcao('cancelar')">Cancelar</button>
+    </div>
+  </div>`;
+  overlay.style.display='flex';
+  window._divCpfDados={divs,dados,acordoIdAtual};
+}
+function _divCpfAcao(acao){
+  const o=$('divCpfOverlay');
+  if(o) o.style.display='none';
+  const {divs,dados,acordoIdAtual}=window._divCpfDados||{};
+  if(acao==='cancelar'||!dados) return;
+  const cpfs=divs.map(d=>d.cpf);
+  if(acao==='atualizar') dados.atualizarDevedores=cpfs;
+  if(acao==='manter')    dados.manterDevedores=cpfs;
+  // Reenviar: POST se novo, PUT se já existe
+  const url=acordoIdAtual?`/api/acordos/${acordoIdAtual}`:'/api/acordos';
+  const method=acordoIdAtual?'PUT':'POST';
+  fetch(url,{method,headers:apiHeaders(),body:JSON.stringify(dados)})
+    .then(r=>r.json()).then(d=>{
+      if(!d.id&&!d.ok) throw new Error(d.erro||'Erro');
+      const id=d.id||acordoIdAtual;
+      if(d.numero){
+        sessionStorage.setItem('ger_acordo_id',id);
+        sessionStorage.setItem('ger_acordo_num',d.numero);
+        const st=$('bancoStatus');
+        if(st){st.textContent=`Salvo como ${d.numero}`;st.style.color='var(--seal)';}
+        toast(`Acordo salvo como ${d.numero}`);
+      } else {
+        toast('Acordo atualizado.');
+      }
+    }).catch(err=>toast('⚠ '+err.message));
+}
+
+/* ── Dashboard ── */
+async function abrirDashboard(){
+  let o=$('dashOverlay');
+  if(!o){
+    o=document.createElement('div');
+    o.id='dashOverlay';
+    o.style.cssText='position:fixed;inset:0;background:rgba(18,32,58,.88);z-index:200;display:flex;align-items:center;justify-content:center';
+    o.innerHTML=`<div style="background:var(--surface);border-radius:8px;width:min(700px,96vw);padding:28px;box-shadow:0 12px 48px rgba(0,0,0,.4)">
+      <div style="display:flex;align-items:center;margin-bottom:20px">
+        <h2 style="margin:0;flex:1">Dashboard</h2>
+        <button class="btn ghost small" onclick="$('dashOverlay').style.display='none'">✕ Fechar</button>
+      </div>
+      <div id="dashCards" style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px"></div>
+    </div>`;
+    document.body.appendChild(o);
+  }
+  o.style.display='flex';
+  const cards=$('dashCards');
+  cards.innerHTML='<p style="color:var(--ink-2);grid-column:1/-1">Carregando…</p>';
+  try{
+    const r=await fetch('/api/dashboard',{headers:apiHeaders()});
+    if(!r.ok) throw new Error((await r.json()).erro||`Erro ${r.status}`);
+    const d=await r.json();
+    const card=(label,val,cor)=>`<div style="background:${cor}10;border:1px solid ${cor}40;border-radius:8px;padding:18px;text-align:center">
+      <div style="font-size:36px;font-weight:700;color:${cor}">${val??'—'}</div>
+      <div style="font-size:13px;color:var(--ink-2);margin-top:4px">${label}</div>
+    </div>`;
+    cards.innerHTML=
+      card('Acordos ativos',         d.ativos,       '#1a73e8')+
+      card('Parcelas vencidas',       d.vencidas,     '#d93025')+
+      card('A vencer em 7 dias',      d.a_vencer_7,   '#f9ab00')+
+      card('Parciais pendentes',      d.parciais,     '#8430ce');
+  }catch(err){
+    cards.innerHTML=`<p style="color:var(--alert);grid-column:1/-1">Erro: ${err.message}</p>`;
+  }
+}
+
+/* ── Vencidas ── */
+async function abrirVencidas(){
+  let o=$('vencidasOverlay');
+  if(!o){
+    o=document.createElement('div');
+    o.id='vencidasOverlay';
+    o.style.cssText='position:fixed;inset:0;background:rgba(18,32,58,.88);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding-top:32px;overflow-y:auto';
+    o.innerHTML=`<div style="background:var(--surface);border-radius:8px;width:min(1100px,98vw);padding:24px;box-shadow:0 12px 48px rgba(0,0,0,.4);margin-bottom:32px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <h2 style="margin:0;flex:1">Parcelas vencidas</h2>
+        <label style="font-size:12px">Atraso mín. <input id="vencMinDias" type="number" value="1" min="1" style="width:60px;padding:4px;border:1px solid var(--line);border-radius:3px"> dias</label>
+        <label style="font-size:12px">máx. <input id="vencMaxDias" type="number" value="9999" min="1" style="width:70px;padding:4px;border:1px solid var(--line);border-radius:3px"> dias</label>
+        <button class="btn small" onclick="carregarVencidas()">Filtrar</button>
+        <button class="btn ghost small" onclick="$('vencidasOverlay').style.display='none'">✕ Fechar</button>
+      </div>
+      <div id="venctabela" style="overflow-x:auto"></div>
+    </div>`;
+    document.body.appendChild(o);
+  }
+  o.style.display='flex';
+  await carregarVencidas();
+}
+
+async function carregarVencidas(){
+  const t=$('venctabela');
+  if(!t) return;
+  t.innerHTML='<p style="color:var(--ink-2);padding:16px">Carregando…</p>';
+  const min=encodeURIComponent($('vencMinDias')?.value||1);
+  const max=encodeURIComponent($('vencMaxDias')?.value||9999);
+  try{
+    const r=await fetch(`/api/vencidas?minDias=${min}&maxDias=${max}`,{headers:apiHeaders()});
+    if(!r.ok) throw new Error((await r.json()).erro||`Erro ${r.status}`);
+    const {vencidas}=await r.json();
+    if(!vencidas.length){t.innerHTML='<p style="color:var(--ink-2);padding:16px">Nenhuma parcela vencida neste intervalo.</p>';return;}
+    const fmtDt=s=>s?new Date(s).toLocaleDateString('pt-BR'):'—';
+    const fmtCts=v=>'R$ '+(v/100).toLocaleString('pt-BR',{minimumFractionDigits:2});
+    t.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <thead><tr style="border-bottom:2px solid var(--line)">
+        <th style="text-align:left;padding:7px 5px">Devedor / tel</th>
+        <th style="text-align:left;padding:7px 5px">Acordo</th>
+        <th style="text-align:left;padding:7px 5px">Parc.</th>
+        <th style="text-align:left;padding:7px 5px">Vencimento</th>
+        <th style="text-align:right;padding:7px 5px">Atraso</th>
+        <th style="text-align:right;padding:7px 5px">Saldo</th>
+        <th style="text-align:left;padding:7px 5px">Últ. lembrete</th>
+        <th style="padding:7px 5px">Ações</th>
+      </tr></thead>
+      <tbody>${vencidas.map(v=>{
+        const tel=v.telefones?`<br><small style="color:var(--ink-2)">${v.telefones}</small>`:'';
+        const parcial=v.valor_pago_cts>0&&v.saldo_cts>0?` <span style="color:#8430ce;font-size:10px">(parcial)</span>`:'';
+        const manual=v.tratamento_manual?` <span style="color:#f9ab00;font-size:10px">⚠ fila</span>`:'';
+        return `<tr style="border-bottom:1px solid var(--line)">
+          <td style="padding:7px 5px">${v.devedores||'—'}${tel}</td>
+          <td style="padding:7px 5px"><a href="#" onclick="event.preventDefault();abrirListagem()" style="color:var(--seal)">${v.acordo_numero}</a></td>
+          <td style="padding:7px 5px;white-space:nowrap">${v.parcela_numero}ª${parcial}${manual}</td>
+          <td style="padding:7px 5px;color:var(--alert);white-space:nowrap">${fmtDt(v.vencimento)}</td>
+          <td style="padding:7px 5px;text-align:right;white-space:nowrap;font-weight:700;color:var(--alert)">${v.dias_atraso}d</td>
+          <td style="padding:7px 5px;text-align:right;white-space:nowrap">${fmtCts(v.saldo_cts)}</td>
+          <td style="padding:7px 5px;color:var(--ink-2);font-size:11px">${v.ultimo_lembrete?fmtDt(v.ultimo_lembrete):'nunca'}</td>
+          <td style="padding:7px 5px;white-space:nowrap">
+            <button class="btn mini" onclick="abrirBaixa('${v.id}',${v.valor_previsto_cts},${v.valor_pago_cts||0})">Baixar</button>
+            ${v.valor_pago_cts>0?`<button class="btn mini ghost" onclick="estornarBaixa('${v.id}')">Estornar</button>`:''}
+          </td>
+        </tr>`;
+      }).join('')}</tbody></table>`;
+  }catch(err){
+    t.innerHTML=`<p style="color:var(--alert);padding:16px">Erro: ${err.message}</p>`;
+  }
+}
+
+/* ── Modal de baixa de pagamento ── */
+function abrirBaixa(parcelaId, previstoCts, pagoCts){
+  let o=$('baixaOverlay');
+  if(!o){
+    o=document.createElement('div');
+    o.id='baixaOverlay';
+    o.style.cssText='position:fixed;inset:0;background:rgba(18,32,58,.88);z-index:300;display:flex;align-items:center;justify-content:center';
+    document.body.appendChild(o);
+  }
+  const hoje=new Date().toISOString().slice(0,10);
+  const jaTemBaixa=pagoCts>0;
+  o.innerHTML=`<div style="background:var(--surface);border-radius:8px;width:min(480px,96vw);padding:24px;box-shadow:0 12px 48px rgba(0,0,0,.4)">
+    <h3 style="margin:0 0 16px">Registrar pagamento</h3>
+    <p style="font-size:13px;color:var(--ink-2);margin-bottom:16px">
+      Previsto: R$ ${(previstoCts/100).toLocaleString('pt-BR',{minimumFractionDigits:2})}
+      ${jaTemBaixa?`<br><span style="color:var(--seal)">Já há pagamento de R$ ${(pagoCts/100).toLocaleString('pt-BR',{minimumFractionDigits:2})} — será substituído.</span>`:''}
+    </p>
+    <div class="row"><div><label>Valor pago R$</label>
+      <input type="number" id="bxValor" step="0.01" min="0.01" oninput="bxAtualizarAviso(${previstoCts})" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)"></div></div>
+    <div id="bxAviso" style="display:none;margin:6px 0;padding:8px;border-radius:var(--radius);font-size:12.5px"></div>
+    <div id="bxClassDiv" style="display:none" class="row"><div>
+      <label>Classificar excedente</label>
+      <select id="bxClass" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)">
+        <option value="">— opcional —</option>
+        <option value="encargos_atraso">Encargos por atraso</option>
+        <option value="adiantamento_parcela">Adiantamento de parcela futura</option>
+        <option value="erro_verificar">Erro — a verificar</option>
+      </select>
+    </div></div>
+    <div id="bxSuspeito" style="display:none;padding:10px;background:#fbeeea;border-radius:var(--radius);margin:8px 0;font-size:13px">
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="bxConfSuspeito">
+        Confirmo que o valor está correto mesmo sendo mais que o dobro do previsto
+      </label>
+    </div>
+    <div class="row r2">
+      <div><label>Data</label><input type="date" id="bxData" value="${hoje}" max="${hoje}" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)"></div>
+      <div><label>Forma</label><select id="bxForma" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)">
+        <option value="pix">PIX</option><option value="ted">TED</option>
+        <option value="boleto">Boleto</option><option value="especie">Espécie</option>
+        <option value="cartao">Cartão</option><option value="cheque">Cheque</option>
+        <option value="outro">Outro</option>
+      </select></div>
+    </div>
+    <div class="row"><div><label>Referência (comprovante, etc.)</label>
+      <input type="text" id="bxRef" placeholder="Opcional" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)"></div></div>
+    <div class="row"><div><label>Observação</label>
+      <textarea id="bxObs" rows="2" placeholder="Opcional" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)"></textarea></div></div>
+    <div id="bxErro" style="display:none;color:var(--alert);font-size:12.5px;padding:8px;background:#fbeeea;border-radius:var(--radius);margin-bottom:8px"></div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn primary" id="bxBtn" onclick="confirmarBaixa('${parcelaId}',${previstoCts},${jaTemBaixa})">Confirmar</button>
+      <button class="btn ghost" onclick="$('baixaOverlay').style.display='none'">Cancelar</button>
+    </div>
+  </div>`;
+  o.style.display='flex';
+  $('bxValor').focus();
+}
+
+function bxAtualizarAviso(previstoCts){
+  const valStr=$('bxValor')?.value||'';
+  const valCts=Math.round(parseFloat(valStr)*100)||0;
+  const aviso=$('bxAviso'), classDiv=$('bxClassDiv'), suspeito=$('bxSuspeito');
+  if(!aviso) return;
+  if(valCts<=0||valCts===previstoCts){
+    aviso.style.display='none'; classDiv.style.display='none'; suspeito.style.display='none'; return;
+  }
+  if(valCts>previstoCts){
+    const exc=valCts-previstoCts;
+    const excFmt=(exc/100).toLocaleString('pt-BR',{minimumFractionDigits:2});
+    if(valCts>2*previstoCts){
+      aviso.style.cssText='display:;padding:8px;border-radius:var(--radius);background:#fbeeea;color:var(--alert);font-size:12.5px';
+      aviso.innerHTML=`⚠ R$ ${excFmt} acima do previsto — mais que o dobro. Confirme abaixo antes de prosseguir.`;
+      suspeito.style.display='';
+    }else{
+      aviso.style.cssText='display:;padding:8px;border-radius:var(--radius);background:#fef7e0;color:#b06000;font-size:12.5px';
+      aviso.innerHTML=`⚠ R$ ${excFmt} acima do previsto. Encargos por atraso? Classifique abaixo (opcional).`;
+      suspeito.style.display='none';
+    }
+    classDiv.style.display='';
+  }else{
+    const falt=previstoCts-valCts;
+    const faltFmt=(falt/100).toLocaleString('pt-BR',{minimumFractionDigits:2});
+    aviso.style.cssText='display:;padding:8px;border-radius:var(--radius);background:#f0f4ff;color:#1a73e8;font-size:12.5px';
+    aviso.innerHTML=`Pagamento parcial — R$ ${faltFmt} restante. Parcela entrará na fila de tratamento.`;
+    classDiv.style.display='none'; suspeito.style.display='none';
+  }
+}
+
+async function confirmarBaixa(parcelaId, previstoCts, jaTemBaixa){
+  const btn=$('bxBtn'), erro=$('bxErro');
+  btn.disabled=true; btn.textContent='Salvando…'; erro.style.display='none';
+  const valorCts=Math.round(parseFloat($('bxValor').value)*100);
+  if(!valorCts||valorCts<=0){
+    erro.textContent='Informe um valor maior que zero.'; erro.style.display=''; btn.disabled=false; btn.textContent='Confirmar'; return;
+  }
+  // Bloquear > 2x sem confirmação explícita
+  if(valorCts>2*previstoCts && !$('bxConfSuspeito')?.checked){
+    erro.textContent='Valor suspeito: marque a caixa de confirmação abaixo para prosseguir.'; erro.style.display=''; btn.disabled=false; btn.textContent='Confirmar'; return;
+  }
+  try{
+    const body={
+      valorPagoCts:valorCts,
+      dataPagamento:$('bxData').value,
+      formaPagamento:$('bxForma').value,
+      referencia:$('bxRef').value||undefined,
+      observacao:$('bxObs').value||undefined,
+    };
+    if(jaTemBaixa) body.confirmarSobrescrita=true;
+    if(valorCts>2*previstoCts) body.confirmarValorExcessivo=true;
+    const classi=$('bxClass')?.value; if(classi) body.classificacaoExcedente=classi;
+    const r=await fetch(`/api/parcelas/${parcelaId}/baixar`,{method:'POST',headers:apiHeaders(),body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.erro||`Erro ${r.status}`);
+    $('baixaOverlay').style.display='none';
+    toast(d.parcial?`Pagamento parcial registrado. Parcela em fila de tratamento.`:`Pagamento registrado. Saldo: R$ ${(d.saldoCts/100).toLocaleString('pt-BR',{minimumFractionDigits:2})}`);
+    await carregarVencidas();
+  }catch(err){
+    erro.textContent=err.message; erro.style.display='';
+  }finally{
+    btn.disabled=false; btn.textContent='Confirmar';
+  }
+}
+
+async function estornarBaixa(parcelaId){ abrirEstorno(parcelaId); }
+
+/* ── Modal de estorno ── */
+function abrirEstorno(parcelaId){
+  let o=$('estornoOverlay');
+  if(!o){
+    o=document.createElement('div');
+    o.id='estornoOverlay';
+    o.style.cssText='position:fixed;inset:0;background:rgba(18,32,58,.88);z-index:310;display:flex;align-items:center;justify-content:center';
+    document.body.appendChild(o);
+  }
+  o.innerHTML=`<div style="background:var(--surface);border-radius:8px;width:min(420px,96vw);padding:24px;box-shadow:0 12px 48px rgba(0,0,0,.4)">
+    <h3 style="margin:0 0 12px">Estornar pagamento</h3>
+    <p style="font-size:13px;color:var(--alert);background:#fbeeea;border-radius:var(--radius);padding:10px;margin-bottom:14px">
+      Esta operação reverte o pagamento registrado e o registra em auditoria.
+    </p>
+    <div class="row"><div><label>Motivo do estorno <small style="color:var(--ink-2)">(mínimo 10 caracteres)</small></label>
+      <textarea id="estMotivo" rows="3" placeholder="Ex: Comprovante diverge do valor informado." style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)"></textarea>
+    </div></div>
+    <div id="estErro" style="display:none;color:var(--alert);font-size:12.5px;padding:8px;background:#fbeeea;border-radius:var(--radius);margin:8px 0"></div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn primary" id="estBtn" onclick="confirmarEstorno('${parcelaId}')">Confirmar estorno</button>
+      <button class="btn ghost" onclick="$('estornoOverlay').style.display='none'">Cancelar</button>
+    </div>
+  </div>`;
+  o.style.display='flex';
+  $('estMotivo').focus();
+}
+
+async function confirmarEstorno(parcelaId){
+  const btn=$('estBtn'), erro=$('estErro');
+  const motivo=($('estMotivo')?.value||'').trim();
+  if(motivo.length<10){
+    erro.textContent='Motivo deve ter pelo menos 10 caracteres.';
+    erro.style.display=''; return;
+  }
+  btn.disabled=true; btn.textContent='Processando…'; erro.style.display='none';
+  try{
+    const r=await fetch(`/api/parcelas/${parcelaId}/estornar`,{method:'POST',headers:apiHeaders(),body:JSON.stringify({motivo})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.erro||`Erro ${r.status}`);
+    $('estornoOverlay').style.display='none';
+    toast('Estorno registrado com sucesso.');
+    await carregarVencidas();
+  }catch(err){
+    erro.textContent=err.message; erro.style.display='';
+  }finally{
+    btn.disabled=false; btn.textContent='Confirmar estorno';
+  }
+}
+/* ── Importação retroativa ── */
+function abrirImportar(){
+  let o=$('importarOverlay');
+  if(!o){
+    o=document.createElement('div');
+    o.id='importarOverlay';
+    o.style.cssText='position:fixed;inset:0;background:rgba(18,32,58,.88);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:32px 8px;overflow-y:auto';
+    document.body.appendChild(o);
+  }
+  o.innerHTML=`<div style="background:var(--surface);border-radius:8px;width:min(840px,98vw);padding:24px;box-shadow:0 12px 48px rgba(0,0,0,.4);margin-bottom:32px">
+    <div style="display:flex;align-items:center;margin-bottom:16px">
+      <h2 style="margin:0;flex:1">Importar acordo existente</h2>
+      <button class="btn ghost small" onclick="$('importarOverlay').style.display='none'">✕ Fechar</button>
+    </div>
+    <p style="font-size:13px;color:var(--ink-2);background:#f0f4ff;border-radius:var(--radius);padding:10px;margin-bottom:16px">
+      Para acordos já assinados em papel. Lembretes ficam <strong>desativados</strong> por padrão — ative conscientemente após verificar os dados.
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div><label>Número do acordo (vazio = gerar automaticamente)</label>
+        <input type="text" id="impNumero" placeholder="ex: 2024/015" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)"></div>
+      <div><label>Data de assinatura *</label>
+        <input type="date" id="impDataAssinatura" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)"></div>
+      <div><label>Valor total R$ *</label>
+        <input type="number" id="impValorTotal" step="0.01" placeholder="0,00" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)"></div>
+      <div><label>Origem da dívida</label>
+        <input type="text" id="impOrigem" placeholder="ex: mensalidades" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:var(--radius)"></div>
+    </div>
+    <h3 style="margin:16px 0 8px;font-size:14px">Devedores *
+      <button type="button" class="btn mini" style="margin-left:10px" onclick="impAddDevedor()">+ Devedor</button>
+    </h3>
+    <div id="impDevedoresBody"></div>
+    <h3 style="margin:16px 0 8px;font-size:14px">Parcelas
+      <button type="button" class="btn mini" style="margin-left:10px" onclick="impAddParcela()">+ Linha</button>
+    </h3>
+    <p style="font-size:12px;color:var(--ink-2);margin-bottom:8px">Informe todas as parcelas. Se já paga, preencha valor e data pagos.</p>
+    <div id="impParcelas" style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <thead><tr style="border-bottom:2px solid var(--line)">
+          <th style="padding:5px;text-align:left">N°</th>
+          <th style="padding:5px;text-align:left">Vencimento</th>
+          <th style="padding:5px;text-align:left">Previsto R$</th>
+          <th style="padding:5px;text-align:left">Pago R$</th>
+          <th style="padding:5px;text-align:left">Dt pagamento</th>
+          <th style="padding:5px;text-align:left">Forma</th>
+          <th style="padding:5px"></th>
+        </tr></thead>
+        <tbody id="impParcelasBody"></tbody>
+      </table>
+    </div>
+    <div id="impErro" style="display:none;color:var(--alert);font-size:12.5px;padding:8px;background:#fbeeea;border-radius:var(--radius);margin:10px 0"></div>
+    <div style="margin:12px 0">
+      <label style="font-size:13px">PDF original <small style="color:var(--ink-2)">(opcional — será salvo no Drive se configurado)</small></label>
+      <input type="file" id="impPdf" accept=".pdf" style="display:block;margin-top:4px;font-size:13px">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+      <button class="btn primary" id="impBtn" onclick="confirmarImportar()">Importar acordo</button>
+      <button class="btn ghost" onclick="$('importarOverlay').style.display='none'">Cancelar</button>
+    </div>
+  </div>`;
+  o.style.display='flex';
+  _impCount=0; _impDevCount=0;
+  $('impParcelasBody').innerHTML='';
+  $('impDevedoresBody').innerHTML='';
+  impAddDevedor();
+  impAddParcela();
+}
+
+let _impCount=0;
+let _impDevCount=0;
+
+function impAddDevedor(){
+  const n=++_impDevCount;
+  const div=document.createElement('div');
+  div.id=`impDev${n}`;
+  div.style.cssText='border:1px solid var(--line);border-radius:var(--radius);padding:10px;margin-bottom:8px';
+  div.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <strong style="font-size:13px">Devedor ${n}</strong>
+    ${n>1?`<button class="btn mini ghost" onclick="document.getElementById('impDev${n}').remove()">remover</button>`:''}
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <div><label style="font-size:12px">Nome *</label>
+      <input type="text" id="impDN${n}" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:3px"></div>
+    <div><label style="font-size:12px">CPF *</label>
+      <input type="text" id="impDC${n}" placeholder="000.000.000-00" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:3px"></div>
+    <div><label style="font-size:12px">E-mail</label>
+      <input type="email" id="impDE${n}" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:3px"></div>
+    <div><label style="font-size:12px">Telefone</label>
+      <input type="text" id="impDT${n}" style="width:100%;padding:6px;border:1px solid var(--line);border-radius:3px"></div>
+  </div>`;
+  $('impDevedoresBody').appendChild(div);
+}
+  const n=++_impCount;
+  const formas='<option value="">—</option><option value="pix">PIX</option><option value="ted">TED</option><option value="boleto">Boleto</option><option value="especie">Espécie</option><option value="cartao">Cartão</option><option value="outro">Outro</option>';
+  const tr=document.createElement('tr');
+  tr.id=`impR${n}`;
+  tr.style.borderBottom='1px solid var(--line)';
+  tr.innerHTML=`<td style="padding:4px 5px">${n}</td>
+    <td><input type="date" id="impVe${n}" style="width:118px;padding:4px;border:1px solid var(--line);border-radius:3px"></td>
+    <td><input type="number" id="impPr${n}" step="0.01" placeholder="0,00" style="width:95px;padding:4px;border:1px solid var(--line);border-radius:3px"></td>
+    <td><input type="number" id="impPg${n}" step="0.01" placeholder="—" style="width:95px;padding:4px;border:1px solid var(--line);border-radius:3px"></td>
+    <td><input type="date" id="impDp${n}" style="width:118px;padding:4px;border:1px solid var(--line);border-radius:3px"></td>
+    <td><select id="impFo${n}" style="padding:4px;border:1px solid var(--line);border-radius:3px">${formas}</select></td>
+    <td><button class="btn mini ghost" onclick="document.getElementById('impR${n}').remove()">✕</button></td>`;
+  $('impParcelasBody').appendChild(tr);
+}
+
+async function confirmarImportar(){
+  const btn=$('impBtn'), erro=$('impErro');
+  btn.disabled=true; btn.textContent='Importando…'; erro.style.display='none';
+  try{
+    const rows=[...$('impParcelasBody').querySelectorAll('tr[id^=impR]')];
+    if(!rows.length) throw new Error('Adicione pelo menos uma parcela.');
+    const devRows=[...$('impDevedoresBody').querySelectorAll('div[id^=impDev]')];
+    if(!devRows.length) throw new Error('Adicione pelo menos um devedor.');
+    const parcelas=rows.map((tr,i)=>{
+      const n=tr.id.replace('impR','');
+      const prev=Math.round(parseFloat($(`impPr${n}`)?.value||0)*100);
+      const pagoStr=($(`impPg${n}`)?.value||'').trim();
+      const pago=pagoStr?Math.round(parseFloat(pagoStr)*100):undefined;
+      const dtPag=$(`impDp${n}`)?.value||undefined;
+      const forma=$(`impFo${n}`)?.value||undefined;
+      return {numero:i+1, vencimento:$(`impVe${n}`)?.value||'',
+              valorPrevistoCts:prev,
+              ...(pago?{valorPagoCts:pago}:{}),
+              ...(dtPag?{dataPagamento:dtPag}:{}),
+              ...(forma?{formaPagamento:forma}:{})};
+    });
+    const devedores=devRows.map((div,i)=>{
+      const n=div.id.replace('impDev','');
+      return {
+        nome:($(`impDN${n}`)?.value||'').trim(),
+        cpf: ($(`impDC${n}`)?.value||'').trim(),
+        ...($(`impDE${n}`)?.value?{email:$(`impDE${n}`).value}:{}),
+        ...($(`impDT${n}`)?.value?{tel:  $(`impDT${n}`).value}:{}),
+        papel: i===0?'devedor':'solidario',
+        ordem: i+1,
+      };
+    });
+    // PDF para o Drive (opcional)
+    let pdfBase64;
+    const pdfFile=$('impPdf')?.files?.[0];
+    if(pdfFile){
+      pdfBase64=await new Promise((res,rej)=>{
+        const r=new FileReader();
+        r.onload=e=>res(e.target.result.split(',')[1]);
+        r.onerror=rej;
+        r.readAsDataURL(pdfFile);
+      });
+    }
+    const body={
+      devedores, credoras:[], alunos:[],
+      acordo:{
+        ...($('impNumero')?.value.trim()?{numero:$('impNumero').value.trim()}:{}),
+        dataAssinatura:($('impDataAssinatura')?.value||undefined),
+        valorTotalCts:Math.round(parseFloat($('impValorTotal')?.value||0)*100),
+        entradaCts:0, modoAssinatura:'fisico',
+        ...($('impOrigem')?.value.trim()?{origemDivida:$('impOrigem').value.trim()}:{}),
+      },
+      parcelas,
+      ...(pdfBase64?{pdfBase64}:{}),
+    };
+    const r=await fetch('/api/acordos/importar',{method:'POST',headers:apiHeaders(),body:JSON.stringify(body)});
+    const d=await r.json();
+    if(r.status===409&&d.erro==='CPF_DIVERGENCIA'){mostrarDivergenciasCPF(d.divergencias,body,null);return;}
+    if(!r.ok) throw new Error(d.erro||`Erro ${r.status}`);
+    $('importarOverlay').style.display='none';
+    toast(`Acordo ${d.numero} importado. Lembretes desativados — ative na listagem se necessário.`);
+    await carregarLista();
+  }catch(err){
+    erro.textContent=err.message; erro.style.display='';
+  }finally{
+    btn.disabled=false; btn.textContent='Importar acordo';
+  }
+}
+
+let _listagemAberta=false;
+async function abrirListagem(){
+  if(_listagemAberta) return;
+  _listagemAberta=true;
+  let overlay=$('acordosOverlay');
+  if(!overlay){
+    overlay=document.createElement('div');
+    overlay.id='acordosOverlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(18,32,58,.88);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding-top:40px;overflow-y:auto';
+    overlay.innerHTML=`<div style="background:var(--surface);border-radius:8px;width:min(980px,96vw);padding:24px;box-shadow:0 12px 48px rgba(0,0,0,.4)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <h2 style="margin:0;flex:1">Acordos salvos</h2>
+        <input id="listBusca" type="search" placeholder="Buscar por nome, CPF ou aluno…" style="padding:8px;border:1px solid var(--line);border-radius:var(--radius);width:260px;font-size:13px">
+        <select id="listStatus" style="padding:8px;border:1px solid var(--line);border-radius:var(--radius)">
+          <option value="">Todos os status</option>
+          <option>ativo</option><option>inadimplente</option>
+          <option>quitado</option><option>cancelado</option><option>rascunho</option>
+        </select>
+        <button class="btn ghost small" onclick="fecharListagem()">✕ Fechar</button>
+      </div>
+      <div id="listTabela" style="overflow-x:auto"></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    $('listBusca').addEventListener('input',_debounceLista);
+    $('listStatus').addEventListener('change',carregarLista);
+  }
+  overlay.style.display='flex';
+  await carregarLista();
+}
+function fecharListagem(){
+  const o=$('acordosOverlay');
+  if(o) o.style.display='none';
+  _listagemAberta=false;
+}
+let _listaTimer=null;
+const _debounceLista=()=>{clearTimeout(_listaTimer);_listaTimer=setTimeout(carregarLista,350);};
+
+async function carregarLista(){
+  const tabela=$('listTabela');
+  if(!tabela) return;
+  tabela.innerHTML='<p style="color:var(--ink-2);padding:20px">Carregando…</p>';
+  try{
+    const b=encodeURIComponent($('listBusca')?.value||'');
+    const s=encodeURIComponent($('listStatus')?.value||'');
+    const r=await fetch(`/api/acordos?busca=${b}&status=${s}`,{headers:apiHeaders()});
+    if(!r.ok) throw new Error((await r.json()).erro||`Erro ${r.status}`);
+    const {acordos}=await r.json();
+    if(!acordos.length){tabela.innerHTML='<p style="color:var(--ink-2);padding:20px">Nenhum acordo encontrado.</p>';return;}
+    const fmt=v=>v?'R$ '+(v/100).toLocaleString('pt-BR',{minimumFractionDigits:2}):'—';
+    const fmtDt=s=>s?new Date(s).toLocaleDateString('pt-BR'):'—';
+    const badge={ativo:'#1a73e8',inadimplente:'#d93025',quitado:'#137333',cancelado:'#666',rascunho:'#9fb0c9'};
+    tabela.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:2px solid var(--line)">
+        <th style="text-align:left;padding:8px 6px">N°</th>
+        <th style="text-align:left;padding:8px 6px">Devedor(es)</th>
+        <th style="text-align:left;padding:8px 6px">Aluno(s)</th>
+        <th style="text-align:left;padding:8px 6px">Status</th>
+        <th style="text-align:right;padding:8px 6px">Saldo</th>
+        <th style="text-align:left;padding:8px 6px">Próx. venc.</th>
+        <th style="padding:8px 6px">Lembr.</th>
+        <th style="padding:8px 6px"></th>
+      </tr></thead>
+      <tbody>${acordos.map(a=>`<tr style="border-bottom:1px solid var(--line);cursor:pointer" onclick="verAcordo('${a.id}')">
+        <td style="padding:8px 6px;white-space:nowrap"><b>${a.numero||'—'}</b></td>
+        <td style="padding:8px 6px;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.devedores||'—'}</td>
+        <td style="padding:8px 6px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink-2)">${a.alunos||'—'}</td>
+        <td style="padding:8px 6px"><span style="background:${badge[a.status]||'#9fb0c9'};color:#fff;border-radius:3px;padding:2px 7px;font-size:11px">${a.status}</span></td>
+        <td style="padding:8px 6px;text-align:right;white-space:nowrap">${fmt(a.saldo_total_cts)}</td>
+        <td style="padding:8px 6px;white-space:nowrap;color:${a.status==='inadimplente'?'var(--alert)':'inherit'}">${fmtDt(a.proximo_vencimento)}</td>
+        <td style="padding:8px 6px;text-align:center">
+          <button class="btn mini${a.lembretes_ativos?' ':" ghost "}" title="${a.lembretes_ativos?'Lembretes ativos — clique para desativar':'Lembretes desativados — clique para ativar'}"
+            onclick="event.stopPropagation();toggleLembretes('${a.id}',${a.lembretes_ativos})">${a.lembretes_ativos?'🔔':'🔕'}</button>
+        </td>
+        <td style="padding:8px 6px">${a.drive_file_id?`<a href="#" onclick="event.stopPropagation();abrirPdfDrive('${a.drive_file_id}')" style="color:var(--seal)">PDF</a>`:''}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  }catch(err){
+    tabela.innerHTML=`<p style="color:var(--alert);padding:20px">Erro: ${err.message}</p>`;
+  }
+}
+async function verAcordo(id){
+  const r=await fetch(`/api/acordos/${id}`,{headers:apiHeaders()});
+  const d=await r.json();
+  if(!r.ok) return toast('⚠ '+d.erro);
+  toast(`${d.numero} — ${d.status} — ${d.devedores?.[0]?.nome||''}`);
+}
+
+async function toggleLembretes(id, ativoAtual){
+  const novoAtivo=!ativoAtual;
+  let motivo='';
+  if(!novoAtivo){
+    motivo=prompt('Motivo para desativar lembretes (opcional):','Renegociação em andamento')||'';
+  }
+  try{
+    const r=await fetch(`/api/acordos/${id}/lembretes`,{
+      method:'POST',headers:apiHeaders(),
+      body:JSON.stringify({ativo:novoAtivo, motivo:motivo||undefined})
+    });
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.erro||`Erro ${r.status}`);
+    toast(novoAtivo?'Lembretes ativados.':'Lembretes desativados.');
+    await carregarLista();
+  }catch(err){ toast('⚠ '+err.message); }
+}
+  const d=await r.json();
+  if(!r.ok) return toast('⚠ '+d.erro);
+  toast(`${d.numero} — ${d.status} — ${d.devedores?.[0]?.nome||''}`);
+}
 verificarAssinatura();     // status é isento de auth — seguro chamar antes do login
+
+// ─── P1.7: autosave, beforeunload, limpar ───
+let _autosaveTimer=null, _dadosUltimoSalvo=null, _restaurando=false;
+
+function autosave(){
+  if(_restaurando) return; // não salvar durante restauração para evitar laço
+  try{
+    const payload=JSON.stringify({_ts:Date.now(),...coletarDados()});
+    if(payload===_dadosUltimoSalvo) return;
+    try{
+      localStorage.setItem('ger_autosave',payload);
+      _dadosUltimoSalvo=payload;
+      const hm=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+      const el=$('autosave_indicator'); if(el) el.textContent='Salvo às '+hm;
+    }catch(qe){
+      // QuotaExceededError: espaço no navegador esgotado
+      if(qe.name==='QuotaExceededError'||qe.code===22){
+        toast('⚠ Espaço insuficiente no navegador — rascunho NÃO salvo. Use “Salvar dados” para exportar o arquivo.');
+        const el=$('autosave_indicator'); if(el) el.textContent='⚠ Não salvo';
+      } else throw qe;
+    }
+  }catch(e){ console.warn('[autosave]',e.message); }
+}
+function scheduleAutosave(){ if(_restaurando) return; clearTimeout(_autosaveTimer); _autosaveTimer=setTimeout(autosave,2000); }
+
+function pedirRestauracaoAutosave(){
+  try{
+    const raw=localStorage.getItem('ger_autosave'); if(!raw) return false;
+    const dados=JSON.parse(raw);
+    const ts=dados._ts;
+    const dataStr=ts?new Date(ts).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+    // Confirmar com o usuário — duas abas abertas poderiam sobrescrever uma à outra sem aviso
+    const restaurar=confirm('Encontramos um rascunho'+(dataStr?' salvo em '+dataStr:'')+'.\n\nOK = restaurar | Cancelar = descartar e abrir o exemplo padrão\n\nATENÇÃO: Em computadores compartilhados, sempre use “Limpar” ou “Sair” ao terminar.');
+    if(restaurar){
+      _restaurando=true;
+      aplicarDados(dados);
+      _dadosUltimoSalvo=raw;
+      _restaurando=false;
+      const el=$('autosave_indicator'); if(el) el.textContent='Rascunho restaurado';
+      toast('Rascunho restaurado.');
+      return true;
+    }else{
+      localStorage.removeItem('ger_autosave');
+      return false;
+    }
+  }catch(e){ localStorage.removeItem('ger_autosave'); return false; }
+}
+
+function fazerLogout(){
+  sessionStorage.removeItem('ger_jwt');
+  localStorage.removeItem('ger_autosave');
+  _dadosUltimoSalvo=null;
+  const el=$('autosave_indicator'); if(el) el.textContent='';
+  verificarAutenticacao();
+  toast('Sessão encerrada e rascunho apagado.');
+}
+
+function limparDados(){
+  if(!confirm('Limpar todos os dados preenchidos? Esta ação não pode ser desfeita.')) return;
+  credoras=[]; devedores=[]; alunos=[]; itens=[];
+  resetClausulas();
+  localStorage.removeItem('ger_autosave');
+  _dadosUltimoSalvo=null;
+  _gerarChaveIdempotencia(); // novo formulário = nova chave; impede reaproveitar idempotência anterior
+  const el=$('autosave_indicator'); if(el) el.textContent='';
+  const st=$('bancoStatus'); if(st){st.textContent='';st.style.color='';}
+  drawLists(); render();
+  toast('Dados limpos.');
+}
+
+window.addEventListener('beforeunload', e=>{
+  try{ if(JSON.stringify(coletarDados())!==_dadosUltimoSalvo){ e.preventDefault(); return ''; } }catch(err){}
+});
+
+if(!pedirRestauracaoAutosave()) loadExample();
+
+// ─── Responsividade: tabs mobile ───
+function ajustarTopo(){
+  const tb=document.querySelector('.topbar');
+  const tabs=document.getElementById('mobileTabs');
+  const h1=tb?Math.round(tb.getBoundingClientRect().height):57;
+  document.documentElement.style.setProperty('--topbar-h',h1+'px');
+  const h2=(window.innerWidth<=900&&tabs)?Math.round(tabs.getBoundingClientRect().height):0;
+  document.documentElement.style.setProperty('--offset-sticky',(h1+h2)+'px');
+}
+function switchTab(t){
+  const panel=document.querySelector('.panel');
+  const stage=document.querySelector('.stage');
+  const tf=document.getElementById('tab-form');
+  const tp=document.getElementById('tab-prev');
+  if(t==='form'){
+    panel.style.display=''; stage.style.display='none';
+    if(tf){tf.classList.add('active');tf.setAttribute('aria-selected','true');}
+    if(tp){tp.classList.remove('active');tp.setAttribute('aria-selected','false');}
+  }else{
+    panel.style.display='none'; stage.style.display='';
+    if(tp){tp.classList.add('active');tp.setAttribute('aria-selected','true');}
+    if(tf){tf.classList.remove('active');tf.setAttribute('aria-selected','false');}
+    render();
+  }
+  try{sessionStorage.setItem('activeTab',t);}catch(e){}
+}
+document.getElementById('mobileTabs')?.addEventListener('keydown',e=>{
+  const all=[...document.querySelectorAll('#mobileTabs [role=tab]')];
+  const i=all.indexOf(document.activeElement);
+  if(e.key==='ArrowRight'&&i<all.length-1){all[i+1].focus();e.preventDefault();}
+  else if(e.key==='ArrowLeft'&&i>0){all[i-1].focus();e.preventDefault();}
+  else if(e.key===' '||e.key==='Enter'){document.activeElement.click();e.preventDefault();}
+});
+window.addEventListener('resize',()=>{
+  ajustarTopo();
+  const panel=document.querySelector('.panel');
+  const stage=document.querySelector('.stage');
+  if(window.innerWidth>900){panel.style.display='';stage.style.display='';}
+  else switchTab(sessionStorage.getItem('activeTab')||'form');
+});
+ajustarTopo();
+if(window.innerWidth<=900) switchTab(sessionStorage.getItem('activeTab')||'form');
 </script>
+
+<!-- Barra de ações fixada no rodapé (mobile) -->
+<div class="mobile-bottom" id="mobileBottom">
+  <button class="btn primary" onclick="printPdf()">Imprimir/PDF</button>
+  <button class="btn" onclick="baixarPdf()">Baixar PDF</button>
+  <button class="btn" onclick="exportWord()">Word</button>
+  <button class="btn ghost" onclick="saveJson()">Salvar</button>
+</div>
 </body>
 </html>
