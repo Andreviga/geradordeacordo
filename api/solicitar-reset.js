@@ -15,7 +15,9 @@ module.exports = async (req, res) => {
     return res.status(400).json({ erro: 'E-mail obrigatório' });
 
   const pool = getPool();
-  if (!pool) return res.status(503).json({ erro: 'Banco indisponível' });
+  const dbHost = (process.env.DATABASE_URL || '').split('@')[1]?.split('/')[0] || '(DATABASE_URL não definido)';
+  console.error('[solicitar-reset] db-host:', dbHost, '| pool:', !!pool);
+  if (!pool) return res.status(503).json({ erro: 'Banco indisponível', dbHost });
 
   // Garante que as colunas existem (idempotente — migração inline)
   await pool.query(
