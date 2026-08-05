@@ -9,14 +9,14 @@ const bcrypt  = require('bcryptjs');
 const crypto  = require('crypto');
 const { getPool, withTransaction } = require('../api/_db');
 const { criarJWT, verificarRequisicao, verificarRequisicaoComBanco } = require('../api/_auth');
-const acordosHandler  = require('../api/acordos/index.js');
-const acordoIdHandler = require('../api/acordos/[id]/index.js');
-const cancelarHandler = require('../api/acordos/[id]/cancelar.js');
-const baixarHandler   = require('../api/parcelas/[id]/baixar.js');
-const estornarHandler = require('../api/parcelas/[id]/estornar.js');
+const acordosHandler = require('../api/acordos/[[...params]].js');
+const parcelasHandler = require('../api/parcelas/[[...params]].js');
+const cancelarHandler = acordosHandler; // mesmo arquivo, roteado por params
+const importarHandler = acordosHandler; // idem
+const baixarHandler   = parcelasHandler;
+const estornarHandler = parcelasHandler;
 const venchidasHandler= require('../api/vencidas.js');
 const dashHandler     = require('../api/dashboard.js');
-const importarHandler = require('../api/acordos/importar.js');
 
 const SECRET = process.env.JWT_SECRET || 'smoke-test-secret-xxxxxxxxxxxxxxxxx';
 process.env.JWT_SECRET = SECRET;
@@ -186,9 +186,9 @@ async function main() {
   // ── 6. GET /api/acordos/:id ──────────────────────────────────────────────
   grupo('[6] GET /api/acordos/:id — detalhes');
   {
-    const req = mockReq('GET', bearerHeader(adminId, 'admin'), null, { id: acordoId });
+    const req = mockReq('GET', bearerHeader(adminId, 'admin'), null, { params: [acordoId] });
     const res = mockRes();
-    await acordoIdHandler(req, res);
+    await acordosHandler(req, res);
     assert('200 OK', res._status === 200);
     assert('número correto', res._body?.numero === acordoNumero);
     assert('devedores presentes', Array.isArray(res._body?.devedores) && res._body.devedores.length > 0);
@@ -206,9 +206,9 @@ async function main() {
         { numero: 2, vencimento: '2026-02-15', valorPrevistoCts: 50000 },
         { numero: 3, vencimento: '2026-03-15', valorPrevistoCts: 50000 },
       ],
-    }, { id: acordoId });
+    }, { params: [acordoId] });
     const res = mockRes();
-    await acordoIdHandler(req, res);
+    await acordosHandler(req, res);
     assert('PUT sem _versao → 400', res._status === 400);
     assert('code VERSAO_AUSENTE', res._body?.code === 'VERSAO_AUSENTE');
   }
@@ -224,9 +224,9 @@ async function main() {
         { numero: 2, vencimento: '2026-02-15', valorPrevistoCts: 50000 },
         { numero: 3, vencimento: '2026-03-15', valorPrevistoCts: 60000 },
       ],
-    }, { id: acordoId });
+    }, { params: [acordoId] });
     const res = mockRes();
-    await acordoIdHandler(req, res);
+    await acordosHandler(req, res);
     assert('versão antiga → 409', res._status === 409);
     assert('code VERSAO_DESATUALIZADA', res._body?.code === 'VERSAO_DESATUALIZADA');
   }
@@ -363,7 +363,7 @@ async function main() {
       valorPagoCts: Math.floor(parseInt(pRows[0].valor_previsto_cts, 10) / 2),
       dataPagamento: hoje,
       formaPagamento: 'especie',
-    }, { id: pRows[0].id });
+    }, { params: [pRows[0].id, 'baixar'] });
     const res = mockRes();
     await baixarHandler(req, res);
     assert('baixa parcial → 200', res._status === 200);
@@ -407,7 +407,7 @@ async function main() {
       dataPagamento: hoje,
       formaPagamento: 'pix',
       classificacaoExcedente: 'encargos_atraso',
-    }, { id: pRows[0].id });
+    }, { params: [pRows[0].id, 'baixar'] });
     const res = mockRes();
     await baixarHandler(req, res);
     assert('overpayment aceito → 200',    res._status === 200, JSON.stringify(res._body));
@@ -426,7 +426,7 @@ async function main() {
       valorPagoCts: 3 * prev,
       dataPagamento: hoje,
       formaPagamento: 'pix',
-    }, { id: pRows[0].id });
+    }, { params: [pRows[0].id, 'baixar'] });
     const res = mockRes();
     await baixarHandler(req, res);
     assert('> 2x sem confirmação → 400', res._status === 400);
@@ -447,7 +447,7 @@ async function main() {
       valorPagoCts: parseInt(pRows[0].valor_previsto_cts, 10),
       dataPagamento: dtAntes.toISOString().slice(0, 10),
       formaPagamento: 'pix',
-    }, { id: pRows[0].id });
+    }, { params: [pRows[0].id, 'baixar'] });
     const res = mockRes();
     await baixarHandler(req, res);
     assert('data anterior ao acordo → 400', res._status === 400);
@@ -465,7 +465,7 @@ async function main() {
       const body = { valorPagoCts: parseInt(p.valor_previsto_cts, 10),
                      dataPagamento: hoje, formaPagamento: 'pix',
                      confirmarSobrescrita: true }; // parcelas podem ter pagamentos anteriores dos outros testes
-      const req = mockReq('POST', bearerHeader(adminId, 'admin'), body, { id: p.id });
+      const req = mockReq('POST', bearerHeader(adminId, 'admin'), body, { params: [p.id, 'baixar'] });
       const res = mockRes();
       await baixarHandler(req, res);
       assert(`parcela ${i+1} baixada`, res._status === 200);
@@ -480,7 +480,7 @@ async function main() {
     // Estornar a 1ª parcela
     const estReq = mockReq('POST', bearerHeader(adminId, 'admin'),
       { motivo: 'smoke test ciclo quitado — estorno deliberado' },
-      { id: todasParcelas[0].id });
+      { params: [todasParcelas[0].id, 'estornar'] });
     const estRes = mockRes();
     await estornarHandler(estReq, estRes);
     assert('estorno → 200', estRes._status === 200);
@@ -519,7 +519,7 @@ async function main() {
         { numero: 3, vencimento: '2024-06-15', valorPrevistoCts: 80000 },
       ],
     };
-    const req = mockReq('POST', bearerHeader(adminId, 'admin'), payload);
+    const req = mockReq('POST', bearerHeader(adminId, 'admin'), payload, { params: ['importar'] });
     const res = mockRes();
     await importarHandler(req, res);
     assert('importar → 201',            res._status === 201, JSON.stringify(res._body));
@@ -558,7 +558,7 @@ async function main() {
       valorPagoCts: parseInt(pRows[0].valor_previsto_cts, 10),
       dataPagamento: '2024-06-20',
       formaPagamento: 'especie',
-    }, { id: pRows[0].id });
+    }, { params: [pRows[0].id, 'baixar'] });
     const res = mockRes();
     await baixarHandler(req, res);
     assert('data 2024 aceita → 200', res._status === 200, JSON.stringify(res._body));
@@ -570,7 +570,7 @@ async function main() {
       devedores: [{ nome: 'X', cpf: '999.000.003-00' }], credoras: [], alunos: [],
       acordo: { numero: '2024/SMOKE-001', valorTotalCts: 10000, entradaCts: 0 },
       parcelas: [{ numero: 1, vencimento: '2024-07-01', valorPrevistoCts: 10000 }],
-    });
+    }, { params: ['importar'] });
     const res = mockRes();
     await importarHandler(req, res);
     assert('número duplicado → 409', res._status === 409);
@@ -588,7 +588,7 @@ async function main() {
       devedores: [{ nome: 'Outro 2024', cpf: '999.000.004-00' }], credoras: [], alunos: [],
       acordo: { dataAssinatura: '2024-09-01', valorTotalCts: 10000, entradaCts: 0 },
       parcelas: [{ numero: 1, vencimento: '2024-10-01', valorPrevistoCts: 10000 }],
-    });
+    }, { params: ['importar'] });
     const res = mockRes();
     await importarHandler(req, res);
     assert('importar 2024 sem número → 201', res._status === 201);
@@ -603,19 +603,19 @@ async function main() {
 
   grupo('[9] POST /api/acordos/:id/cancelar — 403 para secretaria, 200 para admin');
   {
-    const reqSemMotivo = mockReq('POST', bearerHeader(adminId, 'admin'), {}, { id: acordoId });
+    const reqSemMotivo = mockReq('POST', bearerHeader(adminId, 'admin'), {}, { params: [acordoId, 'cancelar'] });
     const resSemMotivo = mockRes();
     await cancelarHandler(reqSemMotivo, resSemMotivo);
     assert('sem motivo → 400', resSemMotivo._status === 400);
 
     const reqSec = mockReq('POST', bearerHeader(secId, 'secretaria'),
-      { motivo: 'teste smoke' }, { id: acordoId });
+      { motivo: 'teste smoke' }, { params: [acordoId, 'cancelar'] });
     const resSec = mockRes();
     await cancelarHandler(reqSec, resSec);
     assert('secretaria → 403', resSec._status === 403);
 
     const reqAdm = mockReq('POST', bearerHeader(adminId, 'admin'),
-      { motivo: 'smoke test — cancelamento correto' }, { id: acordoId });
+      { motivo: 'smoke test — cancelamento correto' }, { params: [acordoId, 'cancelar'] });
     const resAdm = mockRes();
     await cancelarHandler(reqAdm, resAdm);
     assert('admin + motivo → 200', resAdm._status === 200);
