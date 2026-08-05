@@ -1,9 +1,72 @@
 'use strict';
 // POST /api/solicitar-reset  {email}
-// Gera token de 1h, salva no banco e envia link por e-mail.
-// Sempre retorna 200 (não revela se o e-mail existe).
-const crypto = require('crypto');
-const { getPool } = require('./_db');
+const crypto  = require('crypto');
+const { Pool } = require('pg');
+
+// Pool local para evitar conflitos com o singleton de _db.js
+function conectar() {
+  const url = process.env.DATABASE_URL;
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    u.searchParams.delete('sslmode');
+    u.searchParams.delete('channel_binding');
+    return new Pool({ connectionString: u.toString(), ssl: { rejectUnauthorized: false }, max: 2 });
+  } catch { return new Pool({ connectionString: url, ssl: { rejectUnauthorized: false }, max: 2 }); }
+}
+
+module.exports = async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return res.status(405).json({ erro: 'Método não permitido' });
+
+  const email = (req.body?.email || '').trim().toLowerCase();
+  if (!email || !email.includes('@'))
+    return res.status(400).json({ erro: 'E-mail obrigatório' });
+
+  const pool = conectar();
+  if (!pool) return res.status(503).json({ erro: 'DATABASE_URL não configurado' });
+
+  try {
+    // Garante que as colunas existem (idempotente)
+    await pool.query(
+      'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token TEXT;' +
+      'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token_expira_em TIMESTAMPTZ;'
+    ).catch(() => {});
+
+    const token  = crypto.randomBytes(32).toString('hex');
+    const expira = new Date(Date.now() + 60 * 60 * 1000);
+
+    const { rows } = await pool.query(
+      `UPDATE usuarios SET reset_token=$1, reset_token_expira_em=$2
+        WHERE email=$3 AND ativo=true RETURNING nome`,
+      [token, expira, email]
+    );
+
+    if (rows.length > 0) {
+      const appUrl = (process.env.APP_URL || 'https://gerador-acordo.vercel.app').replace(/\/$/, '');
+      const link   = `${appUrl}/?reset=${token}`;
+      try {
+        const adapter = require('./cron/_emailAdapter');
+        await adapter.send({
+          to: email,
+          subject: 'Redefinição de senha — Gerador de Acordo',
+          text: `Olá, ${rows[0].nome}!\n\nLink para nova senha (válido 1 hora):\n\n${link}`,
+          html: `<p>Olá, <strong>${rows[0].nome}</strong>!</p>
+                 <p><a href="${link}" style="display:inline-block;padding:12px 24px;background:#0b6e5a;color:#fff;text-decoration:none;border-radius:6px">Redefinir senha</a></p>
+                 <p style="font-size:12px;color:#666">Link: ${link}</p>`,
+        });
+        return res.status(200).json({ ok: true, msg: 'Link enviado! Verifique seu e-mail.' });
+      } catch (emailErr) {
+        console.error('[solicitar-reset] SMTP:', emailErr.message);
+        return res.status(200).json({ ok: true, link, aviso: 'SMTP indisponível — use este link' });
+      }
+    }
+    return res.status(200).json({ ok: true, msg: 'Se o e-mail estiver cadastrado, você receberá o link em breve.' });
+  } finally {
+    pool.end().catch(() => {});
+  }
+};
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
