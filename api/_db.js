@@ -3,10 +3,16 @@ const { Pool } = require('pg');
 
 let _pool = null;
 
-function _extractUrl(raw) {
-  // Suporta DATABASE_URL colada como comando psql: psql 'postgresql://...'
-  const m = (raw || '').trim().match(/psql\s+['"]?(postgresql:\/\/.+?)['"]?\s*$/i);
-  return m ? m[1] : (raw || '');
+function _validateUrl(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const url = raw.trim();
+  if (!url.startsWith('postgresql://') && !url.startsWith('postgres://'))
+    throw new Error(
+      `DATABASE_URL inválida: esperado "postgresql://..." mas recebeu "${url.substring(0, 40)}..."\n` +
+      'Verifique a variável de ambiente no Vercel — ela deve conter só a connection string, ' +
+      'sem prefixo "psql" ou outros comandos.'
+    );
+  return url;
 }
 
 function _ssl(url) {
@@ -28,7 +34,7 @@ function _cleanUrl(url) {
 
 function getPool() {
   if (!_pool && process.env.DATABASE_URL) {
-    const url = _extractUrl(process.env.DATABASE_URL);
+    const url = _validateUrl(process.env.DATABASE_URL);
     _pool = new Pool({
       connectionString: _cleanUrl(url),
       ssl: _ssl(url),

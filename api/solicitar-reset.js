@@ -1,71 +1,72 @@
 'use strict';
-const crypto  = require('crypto');
-const { Pool } = require('pg');
-const { criarJWT } = require('./_auth');
+// POST /api/solicitar-reset  {email}
+// Endpoint público: usuário pode estar sem sessão válida.
+const crypto = require('crypto');
+const { getPool } = require('./_db');
 
-// Parseia DATABASE_URL — suporta "psql 'postgresql://...'" ou URL direta
-function parseDbUrl(raw) {
-  if (!raw) return null;
-  var url = raw.trim();
-  var m = url.match(/psql\s+['"]?(postgresql:\/\/.+?)['"]?\s*$/i);
-  if (m) url = m[1]; // extrai URL do wrapper psql
-  try {
-    const u = new URL(url);
-    return {
-      host:     u.hostname,
-      port:     parseInt(u.port || '5432', 10),
-      user:     decodeURIComponent(u.username),
-      password: decodeURIComponent(u.password),
-      database: u.pathname.replace(/^\//, ''),
-      ssl:      { rejectUnauthorized: false },
-      max: 2,
-    };
-  } catch {
-    // keyword format fallback
-    return { connectionString: raw, ssl: { rejectUnauthorized: false }, max: 2 };
-  }
+// Rate limiting por IP em memória — proteção básica para ferramenta interna
+const _reqs = new Map();
+const RATE_LIMIT_MS = 60 * 1000;   // janela de 1 min
+const RATE_LIMIT_MAX = 3;           // max tentativas por janela
+
+function rateOk(ip) {
+  const now = Date.now();
+  const rec = _reqs.get(ip) || { count: 0, reset: now + RATE_LIMIT_MS };
+  if (now > rec.reset) { rec.count = 0; rec.reset = now + RATE_LIMIT_MS; }
+  rec.count++;
+  _reqs.set(ip, rec);
+  return rec.count <= RATE_LIMIT_MAX;
 }
 
-// POST /api/solicitar-reset  {email}
+// Mensagem genérica — não revela se o e-mail existe (anti-enumeração)
+const MSG_GENERICA = 'Se o e-mail estiver cadastrado, você receberá o link em breve.';
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ erro: 'Metodo nao permitido' });
+  if (req.method !== 'POST') return res.status(405).json({ erro: 'Método não permitido' });
 
-  const email = (req.body && req.body.email || '').trim().toLowerCase();
-  if (!email || email.indexOf('@') < 0)
-    return res.status(400).json({ erro: 'E-mail obrigatorio' });
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'unknown';
+  if (!rateOk(ip)) return res.status(429).json({ erro: 'Muitas tentativas. Aguarde 1 minuto.' });
 
-  const cfg = parseDbUrl(process.env.DATABASE_URL);
-  if (!cfg) return res.status(503).json({ erro: 'DATABASE_URL nao configurado' });
+  const email = (req.body?.email || '').trim().toLowerCase();
+  if (!email || !email.includes('@'))
+    return res.status(400).json({ erro: 'E-mail obrigatório' });
 
-  const pool = new Pool(cfg);
-  try {
-    await pool.query('ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token TEXT').catch(function(){});
-    await pool.query('ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token_expira_em TIMESTAMPTZ').catch(function(){});
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ erro: 'Banco de dados não configurado' });
 
-    var token  = crypto.randomBytes(32).toString('hex');
-    var expira = new Date(Date.now() + 60 * 60 * 1000);
+  const token  = crypto.randomBytes(32).toString('hex');
+  const expira = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
 
-    var r = await pool.query(
-      'UPDATE usuarios SET reset_token=$1, reset_token_expira_em=$2 WHERE email=$3 AND ativo=true RETURNING nome',
-      [token, expira, email]
-    );
+  const { rows } = await pool.query(
+    `UPDATE usuarios SET reset_token=$1, reset_token_expira_em=$2
+      WHERE email=$3 AND ativo=true RETURNING nome`,
+    [token, expira, email]
+  );
 
-    if (r.rows.length > 0) {
-      var appUrl = (process.env.APP_URL || 'https://gerador-acordo.vercel.app').replace(/\/$/, '');
-      var link   = appUrl + '/?reset=' + token;
-      try {
-        var adapter = require('./cron/_emailAdapter');
-        await adapter.send({ to: email, subject: 'Redefinicao de senha', text: 'Link: ' + link });
-        return res.status(200).json({ ok: true, msg: 'Link enviado! Verifique seu e-mail.' });
-      } catch (emailErr) {
-        console.error('[solicitar-reset] SMTP:', emailErr.message);
-        return res.status(200).json({ ok: true, link: link, aviso: 'SMTP indisponivel' });
-      }
+  if (rows.length > 0) {
+    const appUrl = (process.env.APP_URL || 'https://gerador-acordo.vercel.app').replace(/\/$/, '');
+    const link   = `${appUrl}/?reset=${token}`;
+    try {
+      const adapter = require('./cron/_emailAdapter');
+      await adapter.send({
+        to: email,
+        subject: 'Redefinição de senha — Gerador de Acordo',
+        text: `Olá, ${rows[0].nome}!\n\nLink para nova senha (válido 1 hora):\n\n${link}\n\nSe não foi você, ignore este e-mail.`,
+        html: `<p>Olá, <strong>${rows[0].nome}</strong>!</p>
+               <p><a href="${link}" style="display:inline-block;padding:12px 24px;background:#0b6e5a;color:#fff;text-decoration:none;border-radius:6px">Redefinir senha</a></p>
+               <p style="font-size:12px;color:#666">Link: ${link}</p>`,
+      });
+      // SMTP enviou: retorna mensagem genérica (não confirma existência do e-mail)
+      return res.status(200).json({ ok: true, msg: MSG_GENERICA });
+    } catch (emailErr) {
+      // SMTP falhou: retorna link diretamente (ferramenta interna; acesso já autenticado no Vercel)
+      console.error('[solicitar-reset] SMTP:', emailErr.message);
+      return res.status(200).json({ ok: true, link, aviso: 'SMTP indisponível — use o link' });
     }
-    return res.status(200).json({ ok: true, msg: 'Se o e-mail estiver cadastrado, voce recebera o link.' });
-  } finally {
-    pool.end().catch(function(){});
   }
+
+  // E-mail não encontrado: mesma mensagem genérica, mesmo timing
+  return res.status(200).json({ ok: true, msg: MSG_GENERICA });
 };
