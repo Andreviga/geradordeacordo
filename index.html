@@ -220,18 +220,55 @@ input[type=range]{width:100%;accent-color:var(--seal)}
   <div class="login-card">
     <h2>Gerador de Acordo</h2>
     <div class="login-sub">Colégio Raízes · Acesso restrito</div>
-    <form id="loginForm" onsubmit="fazerLogin(event)">
-      <label for="loginEmail">E-mail</label>
-      <input type="email" id="loginEmail" placeholder="secretaria@escola.com.br"
-             autocomplete="username" required autofocus
-             style="width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:12px;font-size:14px;outline:none">
-      <label for="loginSenha">Senha</label>
-      <input type="password" id="loginSenha" placeholder="••••••••"
-             autocomplete="current-password" required
-             style="width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:16px;font-size:14px;outline:none">
-      <div id="loginErro" class="login-erro" style="display:none"></div>
-      <button type="submit" class="btn primary" id="loginBtn" style="width:100%">Entrar</button>
-    </form>
+
+    <!-- Painel principal: login -->
+    <div id="painelLogin">
+      <form id="loginForm" onsubmit="fazerLogin(event)">
+        <label for="loginEmail">E-mail</label>
+        <input type="email" id="loginEmail" placeholder="secretaria@escola.com.br"
+               autocomplete="username" required autofocus
+               style="width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:12px;font-size:14px;outline:none">
+        <label for="loginSenha">Senha</label>
+        <input type="password" id="loginSenha" placeholder="••••••••"
+               autocomplete="current-password" required
+               style="width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:16px;font-size:14px;outline:none">
+        <div id="loginErro" class="login-erro" style="display:none"></div>
+        <button type="submit" class="btn primary" id="loginBtn" style="width:100%">Entrar</button>
+      </form>
+      <div style="text-align:center;margin-top:14px">
+        <button type="button" class="btn link" onclick="mostrarPainelReset()" style="font-size:12px">Esqueci minha senha</button>
+      </div>
+    </div>
+
+    <!-- Painel: solicitar reset por e-mail -->
+    <div id="painelSolicitarReset" style="display:none">
+      <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px">Digite seu e-mail e enviaremos um link para criar nova senha.</p>
+      <form onsubmit="solicitarReset(event)">
+        <label for="resetEmail">E-mail</label>
+        <input type="email" id="resetEmail" placeholder="contato@raizesedu.com.br" required autofocus
+               style="width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:16px;font-size:14px;outline:none">
+        <div id="resetMsg" class="login-erro" style="display:none"></div>
+        <button type="submit" class="btn primary" id="resetBtn" style="width:100%">Enviar link</button>
+      </form>
+      <div style="text-align:center;margin-top:14px">
+        <button type="button" class="btn link" onclick="mostrarPainelLogin()" style="font-size:12px">← Voltar ao login</button>
+      </div>
+    </div>
+
+    <!-- Painel: definir nova senha (via token do e-mail) -->
+    <div id="painelNovaSenha" style="display:none">
+      <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px">Crie sua nova senha.</p>
+      <form onsubmit="confirmarReset(event)">
+        <label for="novaSenha1">Nova senha</label>
+        <input type="password" id="novaSenha1" placeholder="mínimo 8 caracteres" required autofocus minlength="8"
+               style="width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:12px;font-size:14px;outline:none">
+        <label for="novaSenha2">Confirmar senha</label>
+        <input type="password" id="novaSenha2" placeholder="repita a senha" required minlength="8"
+               style="width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:16px;font-size:14px;outline:none">
+        <div id="novaSenhaErro" class="login-erro" style="display:none"></div>
+        <button type="submit" class="btn primary" id="novaSenhaBtn" style="width:100%">Salvar nova senha</button>
+      </form>
+    </div>
   </div>
 </div>
 
@@ -671,8 +708,64 @@ async function fazerLogin(e){
     btn.disabled=false; btn.textContent='Entrar';
   }
 }
-function verificarAutenticacao(){
-  const jwt=getJWT();
+function mostrarPainelLogin()       { $('painelLogin').style.display=''; $('painelSolicitarReset').style.display='none'; $('painelNovaSenha').style.display='none'; }
+function mostrarPainelReset()       { $('painelLogin').style.display='none'; $('painelSolicitarReset').style.display=''; $('painelNovaSenha').style.display='none'; $('resetEmail').value=$('loginEmail').value||''; setTimeout(()=>$('resetEmail').focus(),50); }
+function mostrarPainelNovaSenha()   { $('painelLogin').style.display='none'; $('painelSolicitarReset').style.display='none'; $('painelNovaSenha').style.display=''; }
+
+async function solicitarReset(e){
+  e.preventDefault();
+  const btn=$('resetBtn'), msg=$('resetMsg');
+  btn.disabled=true; btn.textContent='Enviando…'; msg.style.display='none';
+  try{
+    const r=await fetch('/api/solicitar-reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('resetEmail').value})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.erro||'Erro ao solicitar reset.');
+    // Ambiente local sem SMTP: redireciona direto com o token
+    if(d.token){ window.location.href='/?reset='+d.token; return; }
+    msg.textContent='✓ Verifique seu e-mail! O link é válido por 1 hora.';
+    msg.style.background='#e8f5e9'; msg.style.color='#2e7d32'; msg.style.borderColor='#a5d6a7';
+    msg.style.display=''; btn.textContent='Enviado';
+  }catch(err){
+    msg.textContent=err.message; msg.style.background=''; msg.style.color=''; msg.style.borderColor='';
+    msg.style.display=''; btn.disabled=false; btn.textContent='Enviar link';
+  }
+}
+
+async function confirmarReset(e){
+  e.preventDefault();
+  const btn=$('novaSenhaBtn'), erroDiv=$('novaSenhaErro');
+  const s1=$('novaSenha1').value, s2=$('novaSenha2').value;
+  erroDiv.style.display='none';
+  if(s1!==s2){ erroDiv.textContent='As senhas não coincidem.'; erroDiv.style.display=''; return; }
+  btn.disabled=true; btn.textContent='Salvando…';
+  try{
+    const token=new URLSearchParams(location.search).get('reset');
+    const r=await fetch('/api/confirmar-reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,novaSenha:s1})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.erro||'Erro ao salvar senha.');
+    sessionStorage.setItem('ger_jwt',d.token);
+    history.replaceState(null,'','/');
+    $('loginModal').style.display='none';
+    toast('Senha atualizada! Bem-vindo(a), '+d.nome+'.');
+    verificarAssinatura();
+    $('btnVerAcordos').style.display='';
+    $('btnDashboard').style.display='';
+    $('btnVencidas').style.display='';
+    $('btnImportar').style.display='';
+    _gerarChaveIdempotencia();
+  }catch(err){
+    erroDiv.textContent=err.message; erroDiv.style.display='';
+    btn.disabled=false; btn.textContent='Salvar nova senha';
+  }
+}
+
+// Detecta ?reset=TOKEN na URL ao carregar a página
+(function detectarResetToken(){
+  const token=new URLSearchParams(location.search).get('reset');
+  if(token){ document.addEventListener('DOMContentLoaded',()=>{ mostrarPainelNovaSenha(); }); }
+})();
+
+function verificarAutenticacao(){  const jwt=getJWT();
   if(!jwt||jwtExpirado(jwt)){
     $('loginModal').style.display='';
     return false;

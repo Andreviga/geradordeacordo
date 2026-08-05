@@ -412,4 +412,8 @@ $$;
 -- aplique as policies em db/rls_opcional.sql (a criar quando necessário).
 -- As funções app_user_id/app_user_ativo/app_user_admin estão prontas para isso.
 
+-- ── Colunas adicionadas em migrações posteriores (idempotentes) ─────────────
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token          TEXT;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token_expira_em TIMESTAMPTZ;
+
 COMMIT;
