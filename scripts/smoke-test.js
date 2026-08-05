@@ -318,7 +318,7 @@ async function main() {
       dataPagamento: hoje,
       formaPagamento: 'pix',
       referencia: 'PIX-SMOKE-001',
-    }, { id: parcelaId });
+    }, { params: [parcelaId, 'baixar'] });
     const res = mockRes();
     await baixarHandler(req, res);
     assert('baixa integral → 200', res._status === 200);
@@ -330,7 +330,7 @@ async function main() {
   {
     const req = mockReq('POST', bearerHeader(adminId, 'admin'), {
       valorPagoCts: 1000, dataPagamento: hoje, formaPagamento: 'pix',
-    }, { id: parcelaId });
+    }, { params: [parcelaId, 'baixar'] });
     const res = mockRes();
     await baixarHandler(req, res);
     assert('segunda baixa sem confirmação → 409', res._status === 409);
@@ -340,7 +340,7 @@ async function main() {
   grupo('[10d] Estorno da baixa');
   {
     const req = mockReq('POST', bearerHeader(adminId, 'admin'),
-      { motivo: 'smoke test — valor errado' }, { id: parcelaId });
+      { motivo: 'smoke test — valor errado' }, { params: [parcelaId, 'estornar'] });
     const res = mockRes();
     await estornarHandler(req, res);
     assert('estorno → 200', res._status === 200);

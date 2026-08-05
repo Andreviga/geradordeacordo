@@ -148,7 +148,7 @@ async function salvar(req, res, user) {
     }
 
     const { devedoresSalvos, divergencias } = await processarDevedores(db, b.devedores, b.atualizarDevedores, b.manterDevedores);
-    if (divergencias.length > 0) throw Object.assign(new Error('CPF_DIVERGENCIA'), { divergencias });
+    if (divergencias.length > 0) throw Object.assign(new Error('CPF_DIVERGENCIA'), { code: 'CPF_DIVERGENCIA', divergencias });
 
     const credorasSalvas = await processarCredoras(db, b.credoras || []);
     const alunosSalvos   = await processarAlunos(db, b.alunos || []);
@@ -208,7 +208,7 @@ async function importar(req, res, user) {
 
   const resultado = await withTransaction(async (db) => {
     const { devedoresSalvos, divergencias } = await processarDevedores(db, b.devedores, b.atualizarDevedores, b.manterDevedores);
-    if (divergencias.length > 0) throw Object.assign(new Error('CPF_DIVERGENCIA'), { divergencias });
+    if (divergencias.length > 0) throw Object.assign(new Error('CPF_DIVERGENCIA'), { code: 'CPF_DIVERGENCIA', divergencias });
 
     const a = b.acordo;
     let numero = a.numero?.trim() || null;
