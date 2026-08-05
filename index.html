@@ -720,8 +720,8 @@ async function solicitarReset(e){
     const r=await fetch('/api/solicitar-reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('resetEmail').value})});
     const d=await r.json();
     if(!r.ok) throw new Error(d.erro||'Erro ao solicitar reset.');
-    // Ambiente local sem SMTP: redireciona direto com o token
-    if(d.token){ window.location.href='/?reset='+d.token; return; }
+    // SMTP não configurado: servidor retorna o link direto para uso imediato
+    if(d.link){ window.location.href=d.link; return; }
     msg.textContent='✓ Verifique seu e-mail! O link é válido por 1 hora.';
     msg.style.background='#e8f5e9'; msg.style.color='#2e7d32'; msg.style.borderColor='#a5d6a7';
     msg.style.display=''; btn.textContent='Enviado';
@@ -762,7 +762,7 @@ async function confirmarReset(e){
 // Detecta ?reset=TOKEN na URL ao carregar a página
 (function detectarResetToken(){
   const token=new URLSearchParams(location.search).get('reset');
-  if(token){ document.addEventListener('DOMContentLoaded',()=>{ mostrarPainelNovaSenha(); }); }
+  if(token) mostrarPainelNovaSenha(); // script está no bottom-of-body, DOM já está pronto
 })();
 
 function verificarAutenticacao(){  const jwt=getJWT();

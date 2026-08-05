@@ -30,13 +30,10 @@ module.exports = async (req, res) => {
   );
 
   if (rows.length > 0) {
-    // Envia e-mail apenas se SMTP estiver configurado
+    const base = process.env.APP_URL || 'https://gerador-acordo.vercel.app';
+    const link = `${base}/?reset=${token}`;
     try {
       const adapter = require('./cron/_emailAdapter');
-      const base = process.env.VERCEL_PROJECT_PRODUCTION_URL
-        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-        : (process.env.APP_URL || 'https://gerador-acordo.vercel.app');
-      const link = `${base}/?reset=${token}`;
       await adapter.send({
         to: email,
         subject: 'Redefinição de senha — Gerador de Acordo',
@@ -47,11 +44,12 @@ module.exports = async (req, res) => {
                <p style="font-size:12px;color:#666">Ou copie o link: ${link}</p>
                <p style="font-size:12px;color:#666">Se não foi você, ignore este e-mail.</p>`,
       });
+      // E-mail enviado com sucesso
+      return res.status(200).json({ ok: true, msg: 'Verifique seu e-mail! O link é válido por 1 hora.' });
     } catch (err) {
-      // SMTP não configurado ou falhou — retorna o token para reset local
-      if (process.env.NODE_ENV !== 'production')
-        return res.status(200).json({ aviso: 'SMTP não configurado', token, link: `/?reset=${token}` });
-      console.error('[solicitar-reset] SMTP falhou:', err.message);
+      // SMTP não configurado ou falhou — retorna o link diretamente (ferramenta interna)
+      console.error('[solicitar-reset] SMTP:', err.message);
+      return res.status(200).json({ ok: true, link, aviso: 'SMTP não configurado — use o link abaixo' });
     }
   }
 
