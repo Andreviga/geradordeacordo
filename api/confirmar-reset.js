@@ -3,7 +3,7 @@
 // Valida token, atualiza senha e devolve JWT para login automático.
 const bcrypt = require('bcryptjs');
 const { getPool } = require('./_db');
-const { gerarJWT } = require('./_auth');
+const { criarJWT } = require('./_auth');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -44,7 +44,7 @@ module.exports = async (req, res) => {
   if (!secret) return res.status(503).json({ erro: 'JWT_SECRET não configurado' });
 
   const exp = Math.floor(Date.now() / 1000) + 8 * 3600;
-  const jwtToken = gerarJWT({ sub: u.id, email: u.email, papel: u.papel, exp });
+  const jwtToken = criarJWT({ sub: u.id, email: u.email, papel: u.papel, exp }, secret);
 
   return res.status(200).json({ ok: true, token: jwtToken, nome: u.nome });
 };
