@@ -19,6 +19,7 @@
     "db:status": "node scripts/db-status.js",
     "db:criar-admin": "node scripts/db-criar-admin.js",
     "db:selftest": "node scripts/db-selftest.js",
+    "db:resetar-senha":   "node scripts/db-resetar-senha.js",
     "smoke":       "node scripts/smoke-test.js",
     "health":             "node scripts/health.js",
     "db:limpar-testes":   "node scripts/db-limpar-testes.js",

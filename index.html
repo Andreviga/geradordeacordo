@@ -122,7 +122,11 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 .login-card{background:var(--surface);border-radius:8px;padding:40px;width:320px;max-width:92vw;box-shadow:0 12px 48px rgba(0,0,0,.4)}
 .login-card h2{margin:0 0 2px;font-size:17px;font-weight:700;color:var(--ink)}
 .login-sub{margin:0 0 28px;font-size:12px;color:var(--ink-2)}
-.login-erro{color:var(--alert);font-size:12.5px;padding:8px 10px;background:#fbeeea;border-radius:var(--radius);margin:-6px 0 14px}
+.login-erro{color:#7d3520;font-size:13px;padding:10px 12px;background:#fbeeea;border:1px solid #f5c6bb;border-radius:var(--radius);margin:-6px 0 14px;display:flex;align-items:flex-start;gap:8px}
+.login-erro::before{content:'⚠';font-size:15px;flex-shrink:0;margin-top:1px}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+.login-shake{animation:shake .35s ease-in-out}
+.input-erro{border-color:var(--alert)!important;outline:none}
 #painelValidacao{top:var(--offset-sticky,57px)}
 
 /* ─── Tab navigation (mobile) ─── */
@@ -634,8 +638,10 @@ const apiHeaders=()=>{
 };
 async function fazerLogin(e){
   e.preventDefault();
-  const btn=$('loginBtn'),erro=$('loginErro');
-  btn.disabled=true; btn.textContent='Verificando…'; erro.style.display='none';
+  const btn=$('loginBtn'),erro=$('loginErro'),card=document.querySelector('.login-card');
+  btn.disabled=true; btn.textContent='Verificando…';
+  erro.style.display='none';
+  $('loginSenha').classList.remove('input-erro');
   try{
     const r=await fetch('/api/login',{method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -653,8 +659,14 @@ async function fazerLogin(e){
     $('btnImportar').style.display='';
     _gerarChaveIdempotencia(); // nova sessão de formulário ao fazer login
   }catch(err){
-    $('loginErro').textContent=err.message;
-    $('loginErro').style.display='';
+    erro.textContent=err.message;
+    erro.style.display='';
+    $('loginSenha').classList.add('input-erro');
+    $('loginSenha').select();
+    card.classList.remove('login-shake');
+    void card.offsetWidth; // reinicia a animação
+    card.classList.add('login-shake');
+    card.addEventListener('animationend',()=>card.classList.remove('login-shake'),{once:true});
   }finally{
     btn.disabled=false; btn.textContent='Entrar';
   }
