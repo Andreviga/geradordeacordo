@@ -61,9 +61,9 @@ module.exports = async (req, res) => {
       // SMTP enviou: retorna mensagem genérica (não confirma existência do e-mail)
       return res.status(200).json({ ok: true, msg: MSG_GENERICA });
     } catch (emailErr) {
-      // SMTP falhou: retorna link diretamente (ferramenta interna; acesso já autenticado no Vercel)
-      console.error('[solicitar-reset] SMTP:', emailErr.message);
-      return res.status(200).json({ ok: true, link, aviso: 'SMTP indisponível — use o link' });
+      // SMTP falhou: loga servidor, devolve mensagem genérica — acesso emergencial via db:resetar-senha
+      console.error('[solicitar-reset] SMTP falhou:', emailErr.message);
+      return res.status(200).json({ ok: true, msg: MSG_GENERICA });
     }
   }
 

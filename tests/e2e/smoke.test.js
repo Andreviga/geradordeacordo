@@ -138,6 +138,33 @@ test.describe('Smoke tests — Gerador de Acordo', () => {
     await expect(page.locator('#painelValidacao')).toContainText('token_orfao_teste');
   });
 
+  test('[5] Reload com JWT válido → botões de navegação visíveis', async ({ page }) => {
+    // Reproduz o Bug 6: verificarAutenticacao() escondia o modal mas não mostrava os botões.
+    // Qualquer regressão nessa função vai reaparecer aqui.
+    const erros = [];
+    page.on('pageerror', err => erros.push(err.message));
+
+    await page.addInitScript(() => {
+      function b64url(s) { return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''); }
+      const h = b64url(JSON.stringify({ alg:'HS256', typ:'JWT' }));
+      const p = b64url(JSON.stringify({ sub:'test', papel:'admin',
+        iat: Math.floor(Date.now()/1000), exp: Math.floor(Date.now()/1000)+3600 }));
+      sessionStorage.setItem('ger_jwt', `${h}.${p}.sig`);
+    });
+    await mockAPIs(page);
+    await page.goto('/');
+
+    // Modal deve estar oculto (sessão ativa)
+    await expect(page.locator('#loginModal')).toBeHidden({ timeout: 5000 });
+
+    // Botões de navegação devem ser visíveis após reload com sessão ativa
+    await expect(page.locator('#btnVerAcordos')).toBeVisible({ timeout: 3000 });
+    await expect(page.locator('#btnDashboard')).toBeVisible();
+    await expect(page.locator('#btnVencidas')).toBeVisible();
+
+    expect(erros, 'Erros JS:\n' + erros.join('\n')).toHaveLength(0);
+  });
+
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
