@@ -1545,7 +1545,7 @@ function mostrarPainelValidacao(erros,avisos){
     };
   const link=(x)=>{
     const s=obj(x).secao;
-    return s?' <a href="#" style="font-size:11px;color:var(--alert)" onclick="irParaSecao(''+s+'');return false">ver →</a>':'';
+    return s?` <a href="#" style="font-size:11px;color:var(--alert)" onclick="irParaSecao('${s}');return false">ver →</a>`:'';
   };
   const es=erros.map(obj),as=avisos.map(obj);
   p.innerHTML=
@@ -1554,7 +1554,7 @@ function mostrarPainelValidacao(erros,avisos){
     +(es.length&&as.length?'<br>':'')
     +(as.length&&!es.length?'<strong style="color:#6b4c00">Avisos:</strong><br>':'')
     +as.map(x=>'<span style="color:#6b4c00">⚠ '+esc(x.msg)+'</span>'+link(x)).join('<br>')
-    +'<button onclick="$('painelValidacao').style.display='none'" '
+    +'<button onclick="$(\'painelValidacao\').style.display=\'none\'" '
     +'style="float:right;background:none;border:none;cursor:pointer;font-size:16px;color:inherit" title="Fechar">✕</button>';
   if(es.length>0&&es[0].secao) setTimeout(()=>irParaSecao(es[0].secao),80);
 }
@@ -1707,7 +1707,7 @@ async function _resizeLogo(maxPx){
       const h=Math.round(img.naturalHeight*scale);
       const c=document.createElement('canvas'); c.width=w; c.height=h;
       c.getContext('2d').drawImage(img,0,0,w,h);
-      const b64=c.toDataURL('image/png').replace(/^data:image/png;base64,/,'');
+      const b64=c.toDataURL('image/png').replace(/^data:image\/png;base64,/,'');
       resolve({b64,w,h});
     };
     img.onerror=()=>resolve(null);
@@ -2542,6 +2542,7 @@ function impAddDevedor(){
   </div>`;
   $('impDevedoresBody').appendChild(div);
 }
+function impAddParcela() {
   const n=++_impCount;
   const formas='<option value="">—</option><option value="pix">PIX</option><option value="ted">TED</option><option value="boleto">Boleto</option><option value="especie">Espécie</option><option value="cartao">Cartão</option><option value="outro">Outro</option>';
   const tr=document.createElement('tr');
@@ -2729,10 +2730,6 @@ async function toggleLembretes(id, ativoAtual){
     toast(novoAtivo?'Lembretes ativados.':'Lembretes desativados.');
     await carregarLista();
   }catch(err){ toast('⚠ '+err.message); }
-}
-  const d=await r.json();
-  if(!r.ok) return toast('⚠ '+d.erro);
-  toast(`${d.numero} — ${d.status} — ${d.devedores?.[0]?.nome||''}`);
 }
 verificarAssinatura();     // status é isento de auth — seguro chamar antes do login
 
