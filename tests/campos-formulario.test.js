@@ -32,6 +32,9 @@ const EXCLUIDOS = new Set([
   'lib',          // select de biblioteca de cláusulas (UI, não dado)
   'loginSenha',   // input[type=password] do modal de login (jamais persistido)
   'loginEmail',   // input[type=email] do modal de login (jamais persistido)
+  'resetEmail',   // campo do painel "Esqueci minha senha" (não faz parte do formulário)
+  'novaSenha1',   // campo nova senha do reset (não faz parte do formulário)
+  'novaSenha2',   // campo confirmar senha do reset (não faz parte do formulário)
 ]);
 
 const campos = extrairCamposFormulario();

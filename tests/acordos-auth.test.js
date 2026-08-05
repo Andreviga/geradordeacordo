@@ -230,6 +230,9 @@ grupo('[8] Estrutural: handlers /api/ chamam verificarRequisicao ou são whiteli
     'api/cron/_calcularEvento.js',
     'api/cron/_emailAdapter.js',
     'api/cron/_email_gmail.js',
+    'api/acordos/index.js',       // wrapper de roteamento; auth está no [[...params]].js
+    'api/solicitar-reset.js',     // endpoint público: usuário está bloqueado, sem JWT
+    'api/confirmar-reset.js',     // endpoint público: valida token do e-mail, não JWT
   ]);
 
   function scanHandlers(dir, base = '') {
