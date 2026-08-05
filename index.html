@@ -709,8 +709,9 @@ async function fazerLogin(e){
   }
 }
 function mostrarPainelLogin()       { $('painelLogin').style.display=''; $('painelSolicitarReset').style.display='none'; $('painelNovaSenha').style.display='none'; }
-function mostrarPainelReset()       { $('painelLogin').style.display='none'; $('painelSolicitarReset').style.display=''; $('painelNovaSenha').style.display='none'; $('resetEmail').value=$('loginEmail').value||''; setTimeout(()=>$('resetEmail').focus(),50); }
-function mostrarPainelNovaSenha()   { $('painelLogin').style.display='none'; $('painelSolicitarReset').style.display='none'; $('painelNovaSenha').style.display=''; }
+function mostrarPainelReset()       { $('loginModal').style.display=''; $('painelLogin').style.display='none'; $('painelSolicitarReset').style.display=''; $('painelNovaSenha').style.display='none'; $('resetEmail').value=$('loginEmail').value||''; setTimeout(()=>$('resetEmail').focus(),50); }
+function mostrarPainelNovaSenha()   { $('loginModal').style.display=''; $('painelLogin').style.display='none'; $('painelSolicitarReset').style.display='none'; $('painelNovaSenha').style.display=''; }
+function solicitarResetNovamente(e) { e&&e.preventDefault(); $('resetMsg').style.display='none'; $('resetBtn').disabled=false; $('resetBtn').textContent='Enviar link'; }
 
 async function solicitarReset(e){
   e.preventDefault();
@@ -720,9 +721,9 @@ async function solicitarReset(e){
     const r=await fetch('/api/solicitar-reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('resetEmail').value})});
     const d=await r.json();
     if(!r.ok) throw new Error(d.erro||'Erro ao solicitar reset.');
-    // SMTP não configurado: servidor retorna o link direto para uso imediato
+    // SMTP configurado: exibe mensagem + link copiavel como fallback
     if(d.link){ window.location.href=d.link; return; }
-    msg.textContent='✓ Verifique seu e-mail! O link é válido por 1 hora.';
+    msg.innerHTML='<strong>✓ Link enviado!</strong> Verifique seu e-mail.<br><small style="color:#555">Não recebeu? <a href="#" onclick="solicitarResetNovamente(event)">reenviar</a></small>';
     msg.style.background='#e8f5e9'; msg.style.color='#2e7d32'; msg.style.borderColor='#a5d6a7';
     msg.style.display=''; btn.textContent='Enviado';
   }catch(err){
@@ -762,7 +763,9 @@ async function confirmarReset(e){
 // Detecta ?reset=TOKEN na URL ao carregar a página
 (function detectarResetToken(){
   const token=new URLSearchParams(location.search).get('reset');
-  if(token) mostrarPainelNovaSenha(); // script está no bottom-of-body, DOM já está pronto
+  if(!token) return;
+  sessionStorage.removeItem('ger_jwt'); // garante que o modal aparece mesmo com sessão ativa
+  mostrarPainelNovaSenha();
 })();
 
 function verificarAutenticacao(){  const jwt=getJWT();
