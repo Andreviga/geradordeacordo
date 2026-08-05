@@ -1,9 +1,1 @@
-module.exports = (req, res) => {
-  const url = process.env.DATABASE_URL || '';
-  const parts = url.split('@');
-  const host = parts.length > 1 ? parts[1].split('/')[0] : '(sem @)';
-  const proto = url.substring(0, url.indexOf('://') + 3) || '(vazio)';
-  let urlOk = false;
-  try { new URL(url); urlOk = true; } catch(_){}
-  res.json({ proto, host, len: url.length, urlOk });
-};
+module.exports=(req,res)=>{const u=process.env.DATABASE_URL||'';const h=u.split('@')[1]||'';let ok=false;try{new URL(u);ok=true;}catch(_){}res.json({host:h.split('/')[0]||'(none)',len:u.length,urlOk:ok,proto:u.split(':')[0]||'(empty)'});}
