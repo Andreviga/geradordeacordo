@@ -3,6 +3,12 @@ const { Pool } = require('pg');
 
 let _pool = null;
 
+function _extractUrl(raw) {
+  // Suporta DATABASE_URL colada como comando psql: psql 'postgresql://...'
+  const m = (raw || '').trim().match(/psql\s+['"]?(postgresql:\/\/.+?)['"]?\s*$/i);
+  return m ? m[1] : (raw || '');
+}
+
 function _ssl(url) {
   try {
     const local = ['localhost', '127.0.0.1', '::1'].includes(new URL(url).hostname);
@@ -22,9 +28,10 @@ function _cleanUrl(url) {
 
 function getPool() {
   if (!_pool && process.env.DATABASE_URL) {
+    const url = _extractUrl(process.env.DATABASE_URL);
     _pool = new Pool({
-      connectionString: _cleanUrl(process.env.DATABASE_URL),
-      ssl: _ssl(process.env.DATABASE_URL),
+      connectionString: _cleanUrl(url),
+      ssl: _ssl(url),
       max: 3,                     // Vercel functions: pool pequeno
       idleTimeoutMillis: 15000,
       connectionTimeoutMillis: 5000,
