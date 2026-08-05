@@ -17,6 +17,12 @@ module.exports = async (req, res) => {
   const pool = getPool();
   if (!pool) return res.status(503).json({ erro: 'Banco indisponível' });
 
+  // Garante que as colunas existem (idempotente — migração inline)
+  await pool.query(
+    'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token TEXT;' +
+    'ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token_expira_em TIMESTAMPTZ;'
+  ).catch(() => {}); // ignora se já existirem ou sem permissão
+
   // Gera token e persiste — silencia se e-mail não existe (não revela cadastro)
   const token  = crypto.randomBytes(32).toString('hex');
   const expira = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
