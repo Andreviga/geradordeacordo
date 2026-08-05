@@ -233,6 +233,7 @@ grupo('[8] Estrutural: handlers /api/ chamam verificarRequisicao ou são whiteli
     'api/acordos/index.js',       // wrapper de roteamento; auth está no [[...params]].js
     'api/solicitar-reset.js',     // endpoint público: usuário está bloqueado, sem JWT
     'api/confirmar-reset.js',     // endpoint público: valida token do e-mail, não JWT
+    'api/cron/lembretes.js',      // auth via CRON_SECRET no header Authorization, não JWT
   ]);
 
   function scanHandlers(dir, base = '') {

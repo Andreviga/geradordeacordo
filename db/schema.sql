@@ -416,4 +416,11 @@ $$;
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token          TEXT;
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token_expira_em TIMESTAMPTZ;
 
+-- Índice parcial para unicidade do aviso interno D+15 (um por parcela, sem data):
+-- devedor_id é NULL nos registros internos, então a constraint UNIQUE(parcela_id,evento,devedor_id)
+-- não garante unicidade (PostgreSQL trata NULL != NULL). Este índice resolve.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lembretes_interno_unico
+  ON lembretes_enviados(parcela_id, canal)
+  WHERE canal = 'interno_d15';
+
 COMMIT;
