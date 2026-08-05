@@ -774,6 +774,11 @@ function verificarAutenticacao(){  const jwt=getJWT();
     return false;
   }
   $('loginModal').style.display='none';
+  // Garante que os botões de nav ficam visíveis após reload com sessão ativa
+  $('btnVerAcordos').style.display='';
+  $('btnDashboard').style.display='';
+  $('btnVencidas').style.display='';
+  $('btnImportar').style.display='';
   return true;
 }
 // Converte string de valor para centavos inteiros.
