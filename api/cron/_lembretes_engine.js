@@ -10,24 +10,25 @@ const CONTATO_FONE  = process.env.CONTATO_SECRETARIA_FONE  || '(11) 2741-9849';
 const APP_URL       = (process.env.APP_URL || 'https://gerador-acordo.vercel.app').replace(/\/$/, '');
 const MAX_ENVIOS    = parseInt(process.env.LEMBRETES_MAX_POR_EXECUCAO || '5', 10);
 
-// ─── Consulta candidatos ──────────────────────────────────────────────────────
-async function buscarCandidatos(pool) {
+// ─── Consultas de candidatos ──────────────────────────────────────────────────
+
+// Parcelas candidatas COM e-mail de devedor (D-3, D+1, D+7 enviam ao devedor).
+async function buscarCandidatosComEmail(pool) {
   const { rows } = await pool.query(`
     SELECT
-      p.id                                                      AS parcela_id,
-      p.numero                                                  AS parcela_numero,
-      p.vencimento::date::text                                  AS vencimento,
+      p.id                              AS parcela_id,
+      p.numero                          AS parcela_numero,
+      p.vencimento::date::text          AS vencimento,
       p.valor_previsto_cts,
       p.tratamento_manual,
-      (p.vencimento::date - CURRENT_DATE)                      AS dias,
-      a.id                                                      AS acordo_id,
-      a.numero                                                  AS acordo_numero,
+      (p.vencimento::date - CURRENT_DATE) AS dias,
+      a.id                              AS acordo_id,
+      a.numero                          AS acordo_numero,
       a.multa_mora_pct,
       a.juros_pct,
-      a.lembretes_ativos,
-      d.id                                                      AS devedor_id,
-      d.nome                                                    AS devedor_nome,
-      d.email                                                   AS devedor_email
+      d.id                              AS devedor_id,
+      d.nome                            AS devedor_nome,
+      d.email                           AS devedor_email
     FROM parcelas p
     JOIN acordos a ON a.id = p.acordo_id
     JOIN acordo_devedores ad ON ad.acordo_id = a.id AND ad.papel = 'devedor'
@@ -41,6 +42,60 @@ async function buscarCandidatos(pool) {
     ORDER BY p.vencimento
   `);
   return rows;
+}
+
+// Parcelas que atingiram D+15 — sem filtro de e-mail.
+// D+15 não envia ao devedor: marca tratamento_manual e notifica a secretaria.
+// Filtrar por e-mail aqui significaria nunca sinalizar devedores sem contato, que são
+// exatamente os que mais precisam de intervenção humana.
+async function buscarCandidatosD15(pool) {
+  const { rows } = await pool.query(`
+    SELECT
+      p.id                              AS parcela_id,
+      p.numero                          AS parcela_numero,
+      p.vencimento::date::text          AS vencimento,
+      p.valor_previsto_cts,
+      p.tratamento_manual,
+      (p.vencimento::date - CURRENT_DATE) AS dias,
+      a.id                              AS acordo_id,
+      a.numero                          AS acordo_numero,
+      a.multa_mora_pct,
+      a.juros_pct,
+      d.id                              AS devedor_id,
+      d.nome                            AS devedor_nome,
+      d.email                           AS devedor_email
+    FROM parcelas p
+    JOIN acordos a ON a.id = p.acordo_id
+    JOIN acordo_devedores ad ON ad.acordo_id = a.id AND ad.papel = 'devedor'
+    JOIN devedores d ON d.id = ad.devedor_id
+    WHERE a.lembretes_ativos = true
+      AND a.cancelado = false
+      AND p.valor_pago_cts IS NULL
+      AND p.renegociada = false
+      AND p.vencimento IS NOT NULL
+      AND (p.vencimento::date - CURRENT_DATE) <= -15
+    ORDER BY p.vencimento
+  `);
+  return rows;
+}
+
+// Resumo para o dry-run: total de parcelas vencidas e motivos de exclusão.
+async function buscarResumoExclusoes(pool) {
+  const { rows } = await pool.query(`
+    SELECT
+      COUNT(*)                                                FILTER (WHERE p.valor_pago_cts IS NULL AND p.renegociada = false) AS total_pendentes,
+      COUNT(*)                                                FILTER (WHERE a.lembretes_ativos = false AND p.valor_pago_cts IS NULL AND p.renegociada = false) AS excl_sem_lembrete,
+      COUNT(*)                                                FILTER (WHERE a.cancelado = true  AND p.valor_pago_cts IS NULL AND p.renegociada = false) AS excl_cancelado,
+      COUNT(*)                                                FILTER (WHERE (d.email IS NULL OR d.email = '') AND a.lembretes_ativos = true AND a.cancelado = false AND p.valor_pago_cts IS NULL AND p.renegociada = false AND (p.vencimento::date - CURRENT_DATE) BETWEEN -14 AND -1) AS excl_sem_email_d1d7,
+      COUNT(*)                                                FILTER (WHERE p.tratamento_manual = true AND a.lembretes_ativos = true AND a.cancelado = false AND p.valor_pago_cts IS NULL AND p.renegociada = false) AS ja_em_tratamento_manual,
+      COUNT(*)                                                FILTER (WHERE (p.vencimento::date - CURRENT_DATE) > 3 AND a.lembretes_ativos = true AND a.cancelado = false AND p.valor_pago_cts IS NULL AND p.renegociada = false) AS muito_cedo
+    FROM parcelas p
+    JOIN acordos a ON a.id = p.acordo_id
+    JOIN acordo_devedores ad ON ad.acordo_id = a.id AND ad.papel = 'devedor'
+    JOIN devedores d ON d.id = ad.devedor_id
+    WHERE p.vencimento IS NOT NULL
+  `);
+  return rows[0];
 }
 
 // ─── Formata valor em reais ───────────────────────────────────────────────────
@@ -102,40 +157,62 @@ async function executarLembretes({ dryRun = false, testEmail = false } = {}) {
   const pool = getPool();
   if (!pool) throw new Error('DATABASE_URL não configurado');
 
-  const candidatos = await buscarCandidatos(pool);
-  const eventos    = [];
-  const erros      = [];
+  const [comEmail, d15rows] = await Promise.all([
+    buscarCandidatosComEmail(pool),
+    buscarCandidatosD15(pool),
+  ]);
 
-  for (const r of candidatos) {
+  // Calcular eventos para os candidatos com e-mail (D-3, D+1, D+7)
+  const paraDevedor = [];
+  for (const r of comEmail) {
     const evento = calcularEvento(Number(r.dias));
-    if (!evento) continue;
-    eventos.push({ ...r, evento });
+    if (evento && evento !== 'D+15') paraDevedor.push({ ...r, evento });
   }
 
-  // Separar D+15 dos que enviam e-mail ao devedor
-  const paraDevedor  = eventos.filter(e => e.evento !== 'D+15');
-  const paraD15      = eventos.filter(e => e.evento === 'D+15');
+  // D+15: não usa filtro de e-mail; já filtrado na query
+  const paraD15 = d15rows;
 
-  // Verificar cap de segurança (conta apenas e-mails ao devedor)
-  if (!dryRun && !testEmail && paraDevedor.length > MAX_ENVIOS) {
+  if (dryRun) {
+    const resumo = await buscarResumoExclusoes(pool);
+    return {
+      dryRun: true,
+      resumo: {
+        total_pendentes:         Number(resumo.total_pendentes),
+        excl_sem_lembrete:       Number(resumo.excl_sem_lembrete),
+        excl_cancelado:          Number(resumo.excl_cancelado),
+        excl_sem_email_d1_d7:    Number(resumo.excl_sem_email_d1d7),
+        ja_em_tratamento_manual: Number(resumo.ja_em_tratamento_manual),
+        muito_cedo:              Number(resumo.muito_cedo),
+      },
+      cap: MAX_ENVIOS,
+      paraDevedor: paraDevedor.map(e => ({
+        evento:  e.evento,
+        acordo:  e.acordo_numero,
+        devedor: e.devedor_nome,
+        email:   e.devedor_email,
+        dias:    Number(e.dias),
+      })),
+      paraD15: paraD15.map(e => ({
+        acordo:              e.acordo_numero,
+        devedor:             e.devedor_nome,
+        email:               e.devedor_email || '(sem e-mail)',
+        dias_atraso:         Math.abs(Number(e.dias)),
+        tratamento_manual:   e.tratamento_manual,
+      })),
+    };
+  }
+
+  // Verificar cap de segurança (conta apenas e-mails ao devedor, não avisos internos)
+  if (!testEmail && paraDevedor.length > MAX_ENVIOS) {
     throw new Error(
-      `LEMBRETES_MAX_POR_EXECUCAO (${MAX_ENVIOS}) excedido: ${paraDevedor.length} e-mails pendentes. ` +
+      `LEMBRETES_MAX_POR_EXECUCAO (${MAX_ENVIOS}) excedido: ${paraDevedor.length} e-mails para devedores pendentes. ` +
       'Verifique o dry-run e ajuste o limite antes de prosseguir.'
     );
   }
 
-  if (dryRun) {
-    return {
-      dryRun: true,
-      total: eventos.length,
-      paraDevedor: paraDevedor.map(e => ({ evento: e.evento, acordo: e.acordo_numero, devedor: e.devedor_nome, email: e.devedor_email, dias: e.dias })),
-      paraD15: paraD15.map(e => ({ acordo: e.acordo_numero, devedor: e.devedor_nome, tratamento_manual: e.tratamento_manual })),
-      cap: MAX_ENVIOS,
-    };
-  }
-
   const adapter = require('./_emailAdapter');
   let enviados = 0;
+  const erros  = [];
 
   // ── Lembretes ao devedor (D-3, D+1, D+7) ────────────────────────────────
   for (const r of paraDevedor) {
@@ -238,7 +315,7 @@ async function executarLembretes({ dryRun = false, testEmail = false } = {}) {
     }
   }
 
-  return { enviados, erros, total: eventos.length };
+  return { enviados, erros, total: paraDevedor.length + paraD15.length };
 }
 
 module.exports = { executarLembretes };

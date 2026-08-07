@@ -36,21 +36,29 @@ async function main() {
 
   if (dryRun) {
     console.log('\n=== DRY-RUN — nenhum e-mail enviado ===\n');
-    console.log(`Cap de segurança (LEMBRETES_MAX_POR_EXECUCAO): ${result.cap}`);
-    console.log(`\nE-mails para devedores (${result.paraDevedor.length}):`);
+    const r = result.resumo;
+    console.log('── Parcelas pendentes no banco ──────────────────────');
+    console.log(`  Total pendentes (não pagas, não renegociadas): ${r.total_pendentes}`);
+    console.log(`  Excluídas: acordo cancelado ..............: ${r.excl_cancelado}`);
+    console.log(`  Excluídas: lembretes_ativos = false ......: ${r.excl_sem_lembrete}  ← acordos importados/desativados`);
+    console.log(`  Excluídas: sem e-mail (D+1/D+7 faixa) ...: ${r.excl_sem_email_d1_d7}  ← D+15 ainda verifica estas`);
+    console.log(`  Excluídas: vencimento muito cedo (>3 dias): ${r.muito_cedo}`);
+    console.log(`  Já em tratamento manual ...................: ${r.ja_em_tratamento_manual}`);
+    console.log(`\nCap de segurança (LEMBRETES_MAX_POR_EXECUCAO): ${result.cap}`);
+    console.log(`\n── E-mails para devedores (${result.paraDevedor.length}) ────────────────────`);
     if (result.paraDevedor.length === 0) {
-      console.log('  (nenhum)');
+      console.log('  (nenhum — zero não significa falha; veja o resumo acima)');
     } else {
       result.paraDevedor.forEach(e =>
         console.log(`  [${e.evento}] Acordo ${e.acordo} | ${e.devedor} | ${e.email} | dias: ${e.dias}`)
       );
     }
-    console.log(`\nD+15 — marcação de tratamento manual (${result.paraD15.length}):`);
+    console.log(`\n── D+15 — marcação de tratamento manual + aviso interno (${result.paraD15.length}) ──`);
     if (result.paraD15.length === 0) {
       console.log('  (nenhum)');
     } else {
       result.paraD15.forEach(e =>
-        console.log(`  Acordo ${e.acordo} | ${e.devedor} | tratamento_manual já ativo: ${e.tratamento_manual}`)
+        console.log(`  Acordo ${e.acordo} | ${e.devedor} | e-mail: ${e.email} | atraso: ${e.dias_atraso} dias | tratamento_manual já ativo: ${e.tratamento_manual}`)
       );
     }
   } else if (testEml) {
