@@ -1,33 +1,200 @@
-# Gerador de Acordo — publicação e salvamento na nuvem
+# Gerador de Acordo — Colégio Raízes
 
-Site estático de um arquivo só. Não tem servidor, não tem banco: tudo roda no navegador
-e o salvamento vai direto para o Google Drive de quem está usando.
+Sistema de geração e gestão de Termos de Confissão de Dívida com banco de dados PostgreSQL (Neon) e deploy no Vercel.
+
+## Estrutura
 
 ```
 /
-├── index.html     ← o gerador inteiro (logo e marca d'água já embutidos)
+├── index.html                  ← frontend completo (SPA)
+├── api/                        ← funções serverless Vercel
+│   ├── acordos/                ← CRUD de acordos (catch-all)
+│   ├── parcelas/               ← baixar / estornar parcelas
+│   ├── cron/                   ← lembretes (D-3/D+1/D+7/D+15) e backup semanal
+│   ├── login.js, dashboard.js, vencidas.js, health.js
+│   ├── solicitar-reset.js, confirmar-reset.js
+│   └── assinatura/             ← integração ZapSign / Adobe Sign
+├── db/schema.sql               ← schema PostgreSQL (idempotente)
+├── scripts/                    ← scripts CLI de operação
+├── tests/                      ← testes unitários (437 assertions)
+├── tests/e2e/                  ← testes Playwright
 ├── vercel.json
 └── README.md
 ```
 
 ---
 
-## 1. Publicar no Vercel
+## Backup e Restore
 
-### Caminho rápido (sem GitHub)
+### Backup automático
 
-1. Instale o Node.js e rode no terminal, dentro desta pasta:
-   ```bash
-   npm i -g vercel
-   vercel
-   ```
-2. Responda as perguntas (aceite os padrões). O deploy de produção sai com:
-   ```bash
-   vercel --prod
-   ```
-3. O Vercel devolve a URL, algo como `https://gerador-acordo.vercel.app`.
+O cron `/api/cron/backup` roda toda segunda-feira às 06h UTC (03h BRT).
 
-### Caminho com GitHub (recomendado para editar depois)
+- **Semanal**: `backup-weekly-YYYY-WW.json.gz` — retém as 4 últimas semanas.
+- **Mensal**: `backup-monthly-YYYY-MM.json.gz` (gerado na primeira segunda do mês) — retém os 12 últimos meses.
+- **Destino**: pasta `DRIVE_BACKUP_FOLDER_ID` no Drive Compartilhado (mesma service account dos PDFs).
+- **Formato**: JSON comprimido (zlib/gzip). Contém todas as tabelas na ordem correta de FK.
+
+Para rodar um backup manual de emergência:
+```bash
+npm run cron:backup
+```
+
+### Restore — procedimento exato
+
+#### Pré-requisitos
+- Node.js 18+
+- `DATABASE_URL` apontando para o banco de destino (use `.env.local`)
+- Arquivo `.json.gz` do backup (baixado do Drive)
+
+#### Passo 1 — Descompactar o arquivo
+
+```bash
+# macOS/Linux
+gzip -dk backup-weekly-2026-W31.json.gz
+# → gera backup-weekly-2026-W31.json
+
+# Windows (PowerShell)
+[System.IO.Compression.ZipFile]::ExtractToDirectory('backup-weekly-2026-W31.json.gz', '.')
+# ou: use 7-Zip ou WSL com gzip -dk
+```
+
+#### Passo 2 — Inspecionar o arquivo
+
+```bash
+node -e "const d=require('./backup-weekly-2026-W31.json'); console.log('Gerado em:', d._meta.gerado_em); Object.entries(d.dados).forEach(([t,r])=>console.log(t+':',r.length,'linhas'))"
+```
+
+Confirme que as tabelas e quantidades fazem sentido antes de restaurar.
+
+#### Passo 3 — Restaurar o banco
+
+```bash
+# Cria e roda o script de restore inline
+node -e "
+const fs = require('fs');
+require('./scripts/db-utils').loadEnv();
+const { getPool } = require('./api/_db');
+
+async function main() {
+  const dump = JSON.parse(fs.readFileSync('./backup-weekly-2026-W31.json', 'utf8'));
+  const pool = getPool();
+  const client = await pool.connect();
+
+  await client.query('BEGIN');
+  try {
+    // Desativa FKs temporariamente
+    await client.query('SET CONSTRAINTS ALL DEFERRED');
+
+    for (const [tabela, linhas] of Object.entries(dump.dados)) {
+      if (!linhas.length) continue;
+      await client.query('TRUNCATE ' + tabela + ' CASCADE');
+      const cols = Object.keys(linhas[0]);
+      for (const linha of linhas) {
+        const vals = cols.map((c, i) => '$' + (i + 1));
+        await client.query(
+          'INSERT INTO ' + tabela + ' (' + cols.join(',') + ') VALUES (' + vals.join(',') + ')',
+          cols.map(c => linha[c])
+        );
+      }
+      console.log(tabela + ': ' + linhas.length + ' linhas restauradas');
+    }
+
+    await client.query('COMMIT');
+    console.log('\\nRestore concluído com sucesso.');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
+main().catch(e => { console.error(e.message); process.exit(1); });
+"
+```
+
+#### Passo 4 — Verificar integridade após restore
+
+```bash
+npm run db:status
+```
+
+Deve mostrar todas as tabelas presentes e sem erros de constraint.
+
+#### Restore parcial (apenas uma tabela)
+
+```bash
+node -e "
+const fs = require('fs');
+require('./scripts/db-utils').loadEnv();
+const { getPool } = require('./api/_db');
+const dump = JSON.parse(fs.readFileSync('./backup-weekly-2026-W31.json', 'utf8'));
+const tabela = 'acordos';  // ← altere aqui
+const linhas = dump.dados[tabela];
+const pool = getPool();
+pool.connect().then(async client => {
+  await client.query('BEGIN');
+  await client.query('TRUNCATE ' + tabela + ' CASCADE');
+  const cols = Object.keys(linhas[0] || {});
+  for (const l of linhas) {
+    const vals = cols.map((c,i) => '\$'+(i+1));
+    await client.query('INSERT INTO '+tabela+' ('+cols.join(',')+') VALUES ('+vals.join(',')+')', cols.map(c=>l[c]));
+  }
+  await client.query('COMMIT');
+  console.log(linhas.length + ' linhas restauradas em ' + tabela);
+  client.release(); await pool.end();
+}).catch(e => { console.error(e.message); process.exit(1); });
+"
+```
+
+### Restore de teste trimestral
+
+Procedimento a executar a cada 3 meses no banco de testes (`BANCO_TESTE_HOST`):
+
+1. Baixar o backup mensal mais recente do Drive.
+2. Apontar `DATABASE_URL` para o banco de testes no `.env.local`.
+3. Executar o Passo 3 acima contra o banco de testes.
+4. Rodar `npm run db:status` e `npm test` — todos os testes devem passar.
+5. Documentar a data e resultado (ex: "Restore testado em 2026-10-05, 347 acordos, OK").
+
+---
+
+## Variáveis de ambiente necessárias (Vercel → Settings → Environment Variables)
+
+| Variável | Descrição |
+|---|---|
+| `DATABASE_URL` | Connection string PostgreSQL (Neon) |
+| `JWT_SECRET` | Segredo para assinar tokens JWT (mín. 32 chars) |
+| `CRON_SECRET` | Segredo para autenticar chamadas dos crons |
+| `SMTP_USER` | Gmail da conta de notificações |
+| `SMTP_PASS` | Senha de app do Gmail |
+| `EMAIL_FROM` | Endereço exibido como remetente |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | JSON (ou base64) da service account GCP |
+| `DRIVE_PDF_FOLDER_ID` | ID da pasta de PDFs no Drive Compartilhado |
+| `DRIVE_BACKUP_FOLDER_ID` | ID da pasta de backups no Drive Compartilhado |
+| `CONTATO_SECRETARIA_EMAIL` | E-mail da secretaria (lembretes e replyTo) |
+| `CONTATO_SECRETARIA_FONE` | Telefone da secretaria (corpo dos lembretes) |
+| `LEMBRETES_MAX_POR_EXECUCAO` | Cap de segurança de envios por execução (default: 5) |
+| `APP_URL` | URL de produção (default: https://gerador-acordo.vercel.app) |
+
+---
+
+## Operação
+
+```bash
+npm test                    # 437 assertions unitárias (deve passar sem banco)
+npm run smoke               # smoke test integrado (requer .env.local com banco de teste)
+npm run cron:lembretes -- --dry-run    # lista quem receberia lembrete (sem enviar)
+npm run cron:lembretes -- --test-email # envia 4 templates sintéticos para a secretaria
+npm run cron:backup                    # backup manual imediato
+npm run db:migrate                     # aplica schema (idempotente)
+npm run db:status                      # verifica integridade do banco
+npm run db:resetar-senha contato@raizesedu.com.br NovaSenha
+npm run db:deletar-acordo 2026/001     # remove acordo permanentemente (com confirmação)
+```
+
 
 1. Crie um repositório no GitHub e suba estes três arquivos.
 2. Em vercel.com → **Add New… → Project → Import Git Repository**.
