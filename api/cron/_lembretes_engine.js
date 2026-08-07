@@ -152,8 +152,53 @@ function assuntoInterno(numero, isTest) {
   return isTest ? `[TESTE] ${base}` : base;
 }
 
+// ─── Dados sintéticos para --test-email (zero consultas ao banco) ─────────────
+const MODELO_TESTE = {
+  acordo_numero:      'TESTE-001',
+  parcela_numero:     '3',
+  vencimento:         new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10),
+  valor_previsto_cts: 85000,
+  multa_mora_pct:     2,
+  juros_pct:          1,
+  devedor_nome:       'Maria Silva (devedor de exemplo)',
+  devedor_email:      CONTATO_EMAIL,
+  dias:               -7,
+  parcela_id:         '00000000-0000-0000-0000-000000000000',
+};
+
+async function enviarEmailsTeste() {
+  const adapter = require('./_emailAdapter');
+  const enviados = [], erros = [];
+  const templates = [
+    { evento: 'D-3', texto: textoD3(MODELO_TESTE), fn: textoD3 },
+    { evento: 'D+1', texto: textoD1(MODELO_TESTE), fn: textoD1 },
+    { evento: 'D+7', texto: textoD7(MODELO_TESTE), fn: textoD7 },
+  ];
+  for (const t of templates) {
+    const assunto = assuntoDevedor(MODELO_TESTE.acordo_numero, true);
+    const corpo   = t.fn(MODELO_TESTE);
+    try {
+      await adapter.send({ to: CONTATO_EMAIL, subject: assunto, text: corpo,
+        html: htmlDevedor(assunto, corpo, true), replyTo: CONTATO_EMAIL });
+      enviados.push(t.evento);
+    } catch (err) { erros.push({ evento: t.evento, erro: err.message }); }
+  }
+  // Template interno D+15
+  try {
+    const assunto = assuntoInterno(MODELO_TESTE.acordo_numero, true);
+    await adapter.send({ to: CONTATO_EMAIL, subject: assunto,
+      html: htmlInterno(MODELO_TESTE, true), replyTo: CONTATO_EMAIL,
+      text: `[ENVIO DE VALIDAÇÃO]\n\nAcordo ${MODELO_TESTE.acordo_numero} | Devedor: ${MODELO_TESTE.devedor_nome}\nValor: ${fmt(MODELO_TESTE.valor_previsto_cts)} | Atraso: ${Math.abs(MODELO_TESTE.dias)} dias` });
+    enviados.push('D+15-interno');
+  } catch (err) { erros.push({ evento: 'D+15-interno', erro: err.message }); }
+  return { enviados, erros };
+}
+
 // ─── Executor principal ───────────────────────────────────────────────────────
 async function executarLembretes({ dryRun = false, testEmail = false } = {}) {
+  // --test-email: zero consultas ao banco, zero gravações — dados 100% sintéticos
+  if (testEmail) return enviarEmailsTeste();
+
   const pool = getPool();
   if (!pool) throw new Error('DATABASE_URL não configurado');
 
@@ -216,21 +261,19 @@ async function executarLembretes({ dryRun = false, testEmail = false } = {}) {
 
   // ── Lembretes ao devedor (D-3, D+1, D+7) ────────────────────────────────
   for (const r of paraDevedor) {
-    const isTest = testEmail;
-    const texto = r.evento === 'D-3' ? textoD3(r) : r.evento === 'D+1' ? textoD1(r) : textoD7(r);
-    const destinatario = testEmail ? CONTATO_EMAIL : r.devedor_email;
+    const texto        = r.evento === 'D-3' ? textoD3(r) : r.evento === 'D+1' ? textoD1(r) : textoD7(r);
+    const destinatario = r.devedor_email;
 
-    if (!testEmail) {
-      // Verificar se já enviado (ON CONFLICT DO NOTHING)
+    let rowId = null;
+    {
+      // Verificar se já enviado
       const jaEnviado = await pool.query(
         `SELECT 1 FROM lembretes_enviados WHERE parcela_id=$1 AND evento=$2 AND devedor_id=$3 AND status='ok'`,
         [r.parcela_id, r.evento, r.devedor_id]
       );
       if (jaEnviado.rows.length > 0) continue;
     }
-
-    let rowId = null;
-    if (!testEmail) {
+    {
       const ins = await pool.query(
         `INSERT INTO lembretes_enviados (parcela_id, devedor_id, evento, canal, destinatario, tentativas, status)
          VALUES ($1,$2,$3,'email',$4,1,'pendente')
@@ -244,9 +287,9 @@ async function executarLembretes({ dryRun = false, testEmail = false } = {}) {
     try {
       await adapter.send({
         to:      destinatario,
-        subject: assuntoDevedor(r.acordo_numero, isTest),
+        subject: assuntoDevedor(r.acordo_numero, false),
         text:    texto,
-        html:    htmlDevedor(assuntoDevedor(r.acordo_numero, isTest), texto, isTest),
+        html:    htmlDevedor(assuntoDevedor(r.acordo_numero, false), texto, false),
         replyTo: CONTATO_EMAIL,
       });
       if (rowId) await pool.query(`UPDATE lembretes_enviados SET status='ok', enviado_em=NOW() WHERE id=$1`, [rowId]);
@@ -259,23 +302,6 @@ async function executarLembretes({ dryRun = false, testEmail = false } = {}) {
 
   // ── D+15: marcar tratamento_manual + aviso interno ────────────────────────
   for (const r of paraD15) {
-    if (testEmail) {
-      // Modo teste: só envia o template interno, sem tocar no banco
-      try {
-        await adapter.send({
-          to:      CONTATO_EMAIL,
-          subject: assuntoInterno(r.acordo_numero, true),
-          text:    `[ENVIO DE VALIDAÇÃO]\n\nAcordo nº ${r.acordo_numero}\nDevedor: ${r.devedor_nome}\nParcela: ${r.parcela_numero}ª — ${r.vencimento}\nValor: ${fmt(r.valor_previsto_cts)}\nDias em atraso: ${Math.abs(r.dias)}\nEncargos: multa ${r.multa_mora_pct || 0}% + juros ${r.juros_pct || 0}% a.m.`,
-          html:    htmlInterno(r, true),
-          replyTo: CONTATO_EMAIL,
-        });
-        enviados++;
-      } catch (err) {
-        erros.push({ evento: 'D+15-interno', acordo: r.acordo_numero, erro: err.message });
-      }
-      continue;
-    }
-
     // Verificar se aviso interno já foi enviado (índice único por parcela+canal)
     const jaInterno = await pool.query(
       `SELECT 1 FROM lembretes_enviados WHERE parcela_id=$1 AND canal='interno_d15' AND status='ok'`,
