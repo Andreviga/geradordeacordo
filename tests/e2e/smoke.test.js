@@ -53,11 +53,52 @@ async function mockAPIs(page) {
 }
 
 // Helper: faz login pelo modal
+// #loginEmail é `required` — sem preencher, a validação nativa do HTML5 barra o
+// submit, fazerLogin() nunca roda e o modal não fecha.
 async function fazerLogin(page) {
   await expect(page.locator('#loginModal')).toBeVisible({ timeout: 5000 });
+  await page.fill('#loginEmail', 'teste@escola.com.br');
   await page.fill('#loginSenha', 'qualquer-senha-para-teste');
   await page.click('#loginBtn');
   await expect(page.locator('#loginModal')).toBeHidden({ timeout: 5000 });
+}
+
+// Helper: define valor de <input type="range">.
+// page.fill() não funciona em range (não é campo editável) — expira por timeout.
+// O #form escuta 'input' delegado, então o evento precisa borbulhar.
+async function definirRange(page, seletor, valor) {
+  await page.locator(seletor).evaluate((el, v) => {
+    el.value = String(v);
+    el.dispatchEvent(new Event('input',  { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, valor);
+}
+
+const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174';
+
+// Helper: extrai o TEXTO do PDF via pdfjs.
+// Procurar /\{\{[A-Za-z]/ nos bytes crus do PDF dá falso positivo: page.pdf()
+// comprime os streams (FlateDecode) e a sequência aparece por acaso nos dados
+// binários — verificado num PDF de 261 KB, 1 ocorrência dentro de stream
+// comprimido, com o #doc comprovadamente sem token nenhum. Extrair o texto real
+// é mais forte e não tem falso positivo.
+// Retorna null se o pdfjs não carregar (CDN indisponível) — o teste então pula.
+async function textoDoPdf(page, pdf) {
+  await page.addScriptTag({ url: `${PDFJS_CDN}/pdf.min.js` }).catch(() => {});
+  return page.evaluate(async ({ b64, cdn }) => {
+    const lib = window['pdfjs-dist/build/pdf'];
+    if (!lib) return null;
+    lib.GlobalWorkerOptions.workerSrc = `${cdn}/pdf.worker.min.js`;
+    const doc = await lib.getDocument({
+      data: Uint8Array.from(atob(b64), c => c.charCodeAt(0)),
+    }).promise;
+    let txt = '';
+    for (let i = 1; i <= doc.numPages; i++) {
+      const tc = await (await doc.getPage(i)).getTextContent();
+      txt += tc.items.map(t => t.str).join(' ') + '\n';
+    }
+    return txt;
+  }, { b64: pdf.toString('base64'), cdn: PDFJS_CDN });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -383,10 +424,9 @@ test.describe('@media print — layout e conteúdo', () => {
     const pdf = await page.pdf({ format: 'A4' });
     expect(pdf.length).toBeGreaterThan(5000);
 
-    // Streams de texto no PDF do Chromium são frequentemente não-comprimidos;
-    // verificar ausência de {{ no byte stream (best-effort, não garante texto comprimido)
-    const raw = pdf.toString('binary');
-    expect(/\{\{[A-Za-z]/.test(raw)).toBe(false);
+    const texto = await textoDoPdf(page, pdf);
+    test.skip(texto === null, 'pdfjs não carregou via CDN');
+    expect(texto).not.toMatch(/\{\{[A-Za-z]/);
   });
 
 });
@@ -433,9 +473,10 @@ test.describe('P2 — verificações empíricas', () => {
     // PDF substancial = múltiplas páginas geradas
     expect(pdf.length).toBeGreaterThan(50_000);
 
-    // Sem tokens brutos no stream (conteúdo processado corretamente)
-    const raw = pdf.toString('binary');
-    expect(/\{\{[A-Za-z]/.test(raw)).toBe(false);
+    // Sem tokens brutos no texto extraído (conteúdo processado corretamente)
+    const texto = await textoDoPdf(page, pdf);
+    test.skip(texto === null, 'pdfjs não carregou via CDN');
+    expect(texto).not.toMatch(/\{\{[A-Za-z]/);
 
     // Nota: verificação de cabeçalho por página requer pdfjs-dist ou similar.
     // Verificação visual deve ser feita em Chrome (position:fixed repete) e
@@ -459,7 +500,7 @@ test.describe('P2 — verificações empíricas', () => {
     expect(hasNegZIndex).toBe(false);
 
     // Opacidade mínima (10%): pixels da imagem devem existir
-    await page.fill('#op_marcaop', '10');
+    await definirRange(page, '#op_marcaop', 10);
     await page.waitForTimeout(200);
     const pixelsMin = await page.evaluate(() => {
       const img = document.querySelector('.lh-mark');
@@ -478,7 +519,7 @@ test.describe('P2 — verificações empíricas', () => {
     expect(pixelsMin.nonTransparent, 'Marca d\'água tem pixels em opacidade mínima').toBeGreaterThan(0);
 
     // Opacidade máxima (100%): mais pixels visíveis
-    await page.fill('#op_marcaop', '100');
+    await definirRange(page, '#op_marcaop', 100);
     await page.waitForTimeout(200);
     const pixelsMax = await page.evaluate(() => {
       const img = document.querySelector('.lh-mark');
