@@ -87,14 +87,25 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 
 /* ---------- documento ---------- */
 .page{background:#fff;position:relative;width:100%;max-width:794px;min-height:1123px;padding:0;box-shadow:0 2px 20px rgba(18,32,58,.13);font-family:"Times New Roman",Times,Georgia,serif;font-size:11.5pt;line-height:1.5;color:#000;text-align:justify}
-.sheet{padding:120px 76px 96px}
-.lh-header{position:absolute;top:26px;left:56px;right:56px;text-align:center}
+.sheet{padding:16px 76px 20px}
+/* Grade do documento: <thead>/<tfoot> reais são o único jeito confiável de
+   repetir timbre e rodapé em TODAS as páginas impressas. position:fixed não
+   reserva espaço no fluxo — o timbre saía sobreposto ao corpo (ver @media print). */
+.page table.lh-grid{width:100%;border-collapse:collapse;table-layout:fixed;margin:0;font-size:inherit}
+.page .lh-grid>thead>tr>td,
+.page .lh-grid>tfoot>tr>td,
+.page .lh-grid>tbody>tr>td{border:0;padding:0;background:none;font-size:inherit;text-align:inherit}
+.page .lh-grid>thead>tr>td{padding:26px 56px 0}
+.page .lh-grid>tfoot>tr>td{padding:0 56px 30px}
+.page .lh-grid>thead>tr>td:empty,
+.page .lh-grid>tfoot>tr>td:empty{padding:0}
+.lh-header{text-align:center}
 .lh-header .lh-top{display:flex;align-items:center;gap:14px}
 .lh-header img{width:150px;height:auto;flex:none}
 .lh-txt{flex:1;font-family:Calibri,Arial,sans-serif;font-size:7.8pt;line-height:1.25;text-align:center;color:#000}
 .lh-txt b{font-size:8.2pt;letter-spacing:.01em}
 .lh-rule{height:5px;border-top:2px solid #9a9a9a;border-bottom:2px solid #9a9a9a;margin-top:6px}
-.lh-footer{position:absolute;bottom:30px;left:56px;right:56px;text-align:center}
+.lh-footer{text-align:center}
 .lh-footer .lh-rule{margin:0 0 4px}
 .lh-footer span{font-family:Garamond,Georgia,serif;font-style:italic;font-size:11pt;color:#7a4a1c}
 .lh-footer a{color:#1a3fa0}
@@ -178,7 +189,7 @@ input[type=range]{width:100%;accent-color:var(--seal)}
   .stage{padding:8px 0;justify-content:flex-start;overflow-x:auto;overflow-y:visible;align-items:flex-start}
   .stage .page{min-width:600px}
   .stage .sign .line{width:min(330px,80vw)}
-  .stage .page table{display:block;overflow-x:auto;width:auto;max-width:100%}
+  .stage .page table:not(.lh-grid){display:block;overflow-x:auto;width:auto;max-width:100%}
 }
 
 /* ─── Small phones: < 400px ─── */
@@ -196,14 +207,20 @@ input[type=range]{width:100%;accent-color:var(--seal)}
   .page table{display:table!important;width:100%!important}
   .sign .line{width:87mm}
   .sheet{padding:0}
-  /* P2.2: position:fixed repete em todas as páginas no Chrome (Playwright) e Firefox 127+.
-     Matemática: @page margin-top=3.5cm → content area começa a 3.5cm do topo.
-     lh-header{top:-2.7cm} = 3.5-2.7=0.8cm do topo físico → dentro da margem, sem invasão do corpo.
-     lh-footer{bottom:-1.9cm} = dentro da margem inferior de 2.5cm → sem invasão.
-     Safari: position:fixed não repete em todas as páginas; usar baixarPdf() (html2pdf/Chrome) como alternativa. */
-  @page{size:A4;margin:3.5cm 1.9cm 2.5cm 1.9cm}
-  .lh-header{position:fixed;top:-2.7cm;left:0;right:0;background:#fff}
-  .lh-footer{position:fixed;bottom:-1.9cm;left:0;right:0;background:#fff}
+  /* P2.2: timbre e rodapé repetem via <thead>/<tfoot> da .lh-grid — o navegador
+     repete esses grupos em toda página impressa E reserva espaço no fluxo.
+     A tentativa anterior (position:fixed com deslocamento negativo para dentro da
+     margem) falhava: verificado em Chrome real (CDP printToPDF) e no Chromium do
+     Playwright, o timbre saía no rodapé e o rodapé no topo, ambos sobrepostos ao
+     corpo do texto, em todas as páginas. position:fixed também não reserva espaço,
+     então mesmo posicionado corretamente colidiria com o texto.
+     A margem do @page é só a margem física do papel; o timbre ocupa o topo da
+     área de conteúdo de cada página. */
+  @page{size:A4;margin:1.2cm 1.9cm 1.2cm 1.9cm}
+  .page .lh-grid>thead>tr>td{padding:0 0 10px}
+  .page .lh-grid>tfoot>tr>td{padding:10px 0 0}
+  /* A linha do corpo abrange o documento inteiro: não pode ser indivisível. */
+  .page .lh-grid>tbody>tr{break-inside:auto;page-break-inside:auto}
   /* P2.3: quebras de página */
   .page h2{break-after:avoid;page-break-after:avoid}
   .page h2+p,.page h2+div{break-before:avoid;page-break-before:avoid}
@@ -1240,14 +1257,19 @@ function qualDevedor(d){
   if(d.contato) s+=`, contato: ${esc(d.contato)}`;
   return s+'.';
 }
-function timbreHtml(T){
+function timbreCabecalho(T){
   if(!chk('op_timbre')) return '';
   // Aplicar subst() para que tokens como {{credora}} funcionem no cabeçalho
   const linhas = subst(val('t_texto'),T).split(/\n/).filter(Boolean).map(l=>esc(l)).join('<br>');
   return `<div class="lh-header"><div class="lh-top"><img src="${LOGO}" alt="">`
-    + `<div class="lh-txt"><b>${esc(subst(val('t_linha1'),T))}</b><br>${linhas}</div></div><div class="lh-rule"></div></div>`
-    + `<div class="lh-footer"><div class="lh-rule"></div><span>${esc(subst(val('t_rodape'),T))}</span></div>`;
+    + `<div class="lh-txt"><b>${esc(subst(val('t_linha1'),T))}</b><br>${linhas}</div></div><div class="lh-rule"></div></div>`;
 }
+function timbreRodape(T){
+  if(!chk('op_timbre')) return '';
+  return `<div class="lh-footer"><div class="lh-rule"></div><span>${esc(subst(val('t_rodape'),T))}</span></div>`;
+}
+// Cabeçalho + rodapé juntos, na ordem do documento.
+function timbreHtml(T){ return timbreCabecalho(T)+timbreRodape(T); }
 function marcaHtml(){
   if(!chk('op_marca')) return '';
   return `<img class="lh-mark" src="${MARCA}" alt="" style="opacity:${(num('op_marcaop')/100).toFixed(2)}">`;
@@ -1312,7 +1334,14 @@ function buildDoc(){
 
   
   h+='</div>'; // .assinaturas
-  return marcaHtml()+timbreHtml(T)+`<div class="sheet">${h}</div>`;
+  // Grade com <thead>/<tfoot> reais: é o que faz o navegador repetir timbre e
+  // rodapé em toda página impressa, reservando espaço no fluxo (ver @media print).
+  return marcaHtml()
+    + `<table class="lh-grid">`
+    +   `<thead><tr><td>${timbreCabecalho(T)}</td></tr></thead>`
+    +   `<tfoot><tr><td>${timbreRodape(T)}</td></tr></tfoot>`
+    +   `<tbody><tr><td><div class="sheet">${h}</div></td></tr></tbody>`
+    + `</table>`;
 }
 
 /* ================= render ================= */
@@ -1596,9 +1625,13 @@ td.n{text-align:center} td.v{text-align:right}
 .lh-foot{font-family:Garamond,Georgia,serif;font-style:italic;font-size:11pt;color:#7a4a1c;text-align:center}
 `;}
 function corpoHtml(){
-  const clone=$('doc').cloneNode(true);
+  // Só o corpo: o Word monta timbre/rodapé como header/footer nativos, e o
+  // .sheet vive dentro da .lh-grid (grade de repetição usada na impressão).
+  const sheet=$('doc').querySelector('.sheet');
+  if(!sheet) return '';
+  const clone=sheet.cloneNode(true);
   ['.lh-header','.lh-footer','.lh-mark'].forEach(s=>clone.querySelectorAll(s).forEach(e=>e.remove()));
-  return clone.innerHTML;
+  return clone.outerHTML;
 }
 function wordHtml(){
   // Chama tokens() uma única vez para subst() nos campos do timbrado (C1)

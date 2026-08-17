@@ -357,14 +357,24 @@ test.describe('@media print — layout e conteúdo', () => {
 
   test('[P2] .page table tem display:table em print, não display:block', async ({ page }) => {
     await autenticarPrint(page);
-    await expect(page.locator('#doc table')).toHaveCount(1, { timeout: 5000 });
+    // .lh-grid é a grade de repetição do timbre (thead/tfoot) — o alvo aqui é a
+    // tabela de parcelas, que o CSS mobile torna display:block para rolagem
+    // horizontal e que precisa voltar a display:table na impressão.
+    await expect(page.locator('#doc table:not(.lh-grid)')).toHaveCount(1, { timeout: 5000 });
 
     await page.emulateMedia({ media: 'print' });
     const display = await page.evaluate(() => {
-      const tbl = document.querySelector('#doc table');
+      const tbl = document.querySelector('#doc table:not(.lh-grid)');
       return tbl ? getComputedStyle(tbl).display : 'not-found';
     });
     expect(display).toBe('table');
+    // A grade do timbre também precisa ser tabela de verdade em print — é o que
+    // faz thead/tfoot repetirem por página.
+    const displayGrid = await page.evaluate(() => {
+      const g = document.querySelector('#doc table.lh-grid');
+      return g ? getComputedStyle(g).display : 'not-found';
+    });
+    expect(displayGrid).toBe('table');
   });
 
   test('[P3] largura de .sign .line igual em 375px e 1440px em print', async ({ page }) => {
@@ -663,12 +673,18 @@ test.describe('P2 — verificações empíricas', () => {
       for (let i = 1; i <= doc.numPages; i++) {
         const p = await doc.getPage(i);
         const tc = await p.getTextContent();
-        const pageInfo = { hasHeaderItems: false, bodyInvaders: [] };
+        const pageInfo = { hasHeaderItems: false, timbreY: [], rodapeY: [], bodyInvaders: [] };
         for (const item of tc.items) {
           const y = item.transform[5];
           const txt = item.str.trim();
           if (!txt) continue;
           if (y > BODY_TOP_Y) pageInfo.hasHeaderItems = true; // acima da área de conteúdo
+          // Texto do timbre e do rodapé, identificados pelo conteúdo — o bug
+          // corrigido em 2026-08 imprimia o timbre embaixo e o rodapé no topo,
+          // ambos sobrepostos ao corpo, então checar só "existe algo no topo"
+          // não bastaria.
+          if (/COORDENADORIA/.test(txt))       pageInfo.timbreY.push(Math.round(y));
+          if (/raizesedu\.com\.br/.test(txt))  pageInfo.rodapeY.push(Math.round(y));
           // Corpo não deve entrar na margem superior (exceto texto do próprio cabeçalho)
           if (y > BODY_TOP_Y && /Cláusula|Primeira|Segunda|Terceira|Quarta|Quinta/.test(txt)) {
             pageInfo.bodyInvaders.push({ txt: txt.slice(0, 30), y });
@@ -684,11 +700,22 @@ test.describe('P2 — verificações empíricas', () => {
       return;
     }
 
+    // A4 = 841.89pt. Metade = 421. Timbre tem que estar na metade de cima de
+    // toda página; rodapé, na metade de baixo. Foi exatamente o que quebrou antes.
+    const METADE = 841.89 / 2;
+
     expect(analysis.numPages).toBeGreaterThan(2);
     for (let i = 0; i < analysis.pages.length; i++) {
       const pg = analysis.pages[i];
       expect(pg.hasHeaderItems, `página ${i+1} tem itens na área do cabeçalho`).toBe(true);
       expect(pg.bodyInvaders, `página ${i+1} sem cláusulas invadindo margem`).toHaveLength(0);
+
+      expect(pg.timbreY.length, `página ${i+1} tem o timbre`).toBeGreaterThan(0);
+      expect(pg.rodapeY.length, `página ${i+1} tem o rodapé`).toBeGreaterThan(0);
+      pg.timbreY.forEach(y =>
+        expect(y, `timbre da página ${i+1} no topo (y=${y})`).toBeGreaterThan(METADE));
+      pg.rodapeY.forEach(y =>
+        expect(y, `rodapé da página ${i+1} embaixo (y=${y})`).toBeLessThan(METADE));
     }
   });
 
