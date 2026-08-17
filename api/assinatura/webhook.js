@@ -34,6 +34,14 @@ const { buscarSignedFile } = require('./_providers/zapsign');
 // erro permanente visível nos logs do Vercel e no painel de webhooks da ZapSign.
 const MAX_RETRIES = 3;
 
+// Comparação em tempo constante — mesmo padrão de api/_auth.js
+function igualSeguro(a, b) {
+  const ba = Buffer.from(String(a || ''));
+  const bb = Buffer.from(String(b || ''));
+  if (ba.length !== bb.length) return false;
+  return require('crypto').timingSafeEqual(ba, bb);
+}
+
 // Set in-memory somente para eventos não-críticos (doc_refused, email_bounce, doc_created).
 const eventosProcessados = new Set();
 const MAX_EVENTOS        = 1000;
@@ -42,18 +50,22 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST')    return res.status(405).end();
 
-  // ── Validar segredo do webhook ───────────────────────────────────────────
+  // ── Validar segredo do webhook (fail-closed) ─────────────────────────────
+  // Sem a variável configurada, qualquer um poderia postar doc_signed e disparar
+  // gravação no Drive. Recusa explícita — nunca aceitar sem verificar.
   const secreto = process.env.ZAPSIGN_WEBHOOK_SECRET;
-  if (secreto) {
-    // A ZapSign envia o segredo em header customizado configurado no painel
-    const recebido = req.headers['x-webhook-secret']
-                  || req.headers['x-zapsign-secret']
-                  || req.headers['authorization']
-                  || '';
-    if (recebido !== secreto) {
-      console.warn('[webhook] Segredo inválido — request rejeitado.');
-      return res.status(401).json({ error: 'Webhook secret inválido.' });
-    }
+  if (!secreto) {
+    console.error('[webhook] ZAPSIGN_WEBHOOK_SECRET não configurado — request recusado.');
+    return res.status(503).json({ error: 'Webhook secret não configurado no servidor.' });
+  }
+  // A ZapSign envia o segredo em header customizado configurado no painel
+  const recebido = req.headers['x-webhook-secret']
+                || req.headers['x-zapsign-secret']
+                || req.headers['authorization']
+                || '';
+  if (!igualSeguro(recebido, secreto)) {
+    console.warn('[webhook] Segredo inválido — request rejeitado.');
+    return res.status(401).json({ error: 'Webhook secret inválido.' });
   }
 
   // doc_signed: síncrono — responde 500 em falha para ZapSign reenviar

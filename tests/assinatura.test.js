@@ -169,6 +169,22 @@ grupo('[9] Webhook com segredo errado \u2192 401');
   assert('menciona secret',  respostas[0] && respostas[0].d && respostas[0].d.error.toLowerCase().includes('secret'));
 }
 
+// ── [9b] ─────────────────────────────────────────────────────────────────
+grupo('[9b] Webhook sem ZAPSIGN_WEBHOOK_SECRET configurado → 503 (fail-closed)');
+{
+  const orig = process.env.ZAPSIGN_WEBHOOK_SECRET;
+  delete process.env.ZAPSIGN_WEBHOOK_SECRET;
+  const respostas = [];
+  // Payload que, se aceito, dispararia gravação no Drive
+  const req = { method: 'POST', headers: {}, body: { event_type: 'doc_signed', document: { token: 'x' } } };
+  const res = { status: (code) => ({ json: (d) => { respostas.push({ code, d }); }, end: () => {} }) };
+  await webhookHandler(req, res);
+  if (orig === undefined) delete process.env.ZAPSIGN_WEBHOOK_SECRET;
+  else process.env.ZAPSIGN_WEBHOOK_SECRET = orig;
+  assert('respondeu 503',        respostas[0] && respostas[0].code === 503);
+  assert('não processou evento', respostas.length === 1);
+}
+
 // ── [10] ─────────────────────────────────────────────────────────────────
 grupo('[10] Provedor manual \u2192 SHA-256, instru\u00e7\u00f5es gov.br, sem rede');
 {
