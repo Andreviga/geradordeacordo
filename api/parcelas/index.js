@@ -12,13 +12,14 @@
 // limite de 12 funções do plano Hobby — o catch-all gastava uma vaga sem atender
 // requisição nenhuma. O prefixo `_` faz dele módulo privado, carregado por require.
 //
-// Este wrapper extrai os segmentos do req.url e os injeta como req.query.params
-// antes de delegar. A autenticação é verificada dentro do _handler.js.
+// As sub-rotas (/api/parcelas/<uuid>/baixar e /estornar) chegam aqui por rewrite
+// declarado no vercel.json — o roteamento por sistema de arquivos NÃO as entrega
+// sozinho. Este wrapper injeta os segmentos em req.query.params antes de delegar.
+// A autenticação é verificada dentro do _handler.js.
+const { segmentosDaRota } = require('../_rota');
 const handler = require('./_handler');
 module.exports = (req, res) => {
-  const path  = (req.url || '').split('?')[0];
-  const after = path.replace(/^\/api\/parcelas\/?/, '');
   req.query = req.query || {};
-  req.query.params = after ? after.split('/').filter(Boolean) : [];
+  req.query.params = segmentosDaRota(req, 'parcelas');
   return handler(req, res);
 };

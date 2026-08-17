@@ -7,7 +7,12 @@ const { executarLembretes } = require('./_lembretes_engine');
 
 module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST')   return res.status(405).json({ error: 'Method not allowed' });
+  // O scheduler do Vercel dispara o cron com GET (e manda o CRON_SECRET no
+  // header Authorization). Recusar GET fazia o cron responder 405 a cada
+  // execução — confirmado em produção — e nenhum lembrete era enviado.
+  // POST segue aceito para invocação manual.
+  if (req.method !== 'GET' && req.method !== 'POST')
+    return res.status(405).json({ error: 'Method not allowed' });
 
   const secret = process.env.CRON_SECRET;
   const token  = (req.headers['authorization'] || '').replace('Bearer ', '').trim();

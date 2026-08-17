@@ -13,7 +13,11 @@ const { executarBackup }   = require('./_backup_engine');
 
 module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST')   return res.status(405).json({ error: 'Method not allowed' });
+  // O scheduler do Vercel dispara o cron com GET (CRON_SECRET vai no header
+  // Authorization). Só aceitar POST fazia o backup semanal responder 405 a cada
+  // execução e nunca rodar. POST segue aceito para invocação manual.
+  if (req.method !== 'GET' && req.method !== 'POST')
+    return res.status(405).json({ error: 'Method not allowed' });
 
   const secret = process.env.CRON_SECRET;
   const token  = (req.headers['authorization'] || '').replace('Bearer ', '').trim();

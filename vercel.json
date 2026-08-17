@@ -1,5 +1,10 @@
 {
   "cleanUrls": true,
+  "//": "Rewrites explícitos porque o roteamento por sistema de arquivos do Vercel NÃO entrega sub-rotas para dir/index.js — comprovado em produção: /api/acordos → 401 mas /api/acordos/<uuid> → 404. Aqui as sub-rotas são funiladas para o index.js do recurso, que já sabe extrair os segmentos. O caminho original chega em _rota.",
+  "rewrites": [
+    { "source": "/api/acordos/:rota*",  "destination": "/api/acordos?_rota=:rota*"  },
+    { "source": "/api/parcelas/:rota*", "destination": "/api/parcelas?_rota=:rota*" }
+  ],
   "headers": [
     {
       "source": "/(.*)",
