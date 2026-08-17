@@ -124,7 +124,7 @@ grupo('[4] Token legado (sub="dev") → 401 em endpoints de banco');
 // ── [5] Endpoint /api/acordos — OPTIONS sem auth ───────────────────────────────
 grupo('[5] OPTIONS não requer autenticação');
 {
-  const handler = require('../api/acordos/[[...params]].js');
+  const handler = require('../api/acordos/_handler.js');
   const req = mockReq({ method: 'OPTIONS', headers: {}, query: {} });
   const res = mockRes();
   handler(req, res).then(() => {
@@ -135,7 +135,7 @@ grupo('[5] OPTIONS não requer autenticação');
 // ── [6] Catch-all: cada ramo de /api/acordos exige auth ────────────────────────
 grupo('[6] Todos os ramos do catch-all exigem JWT (sem auth → 401)');
 {
-  const handler = require('../api/acordos/[[...params]].js');
+  const handler = require('../api/acordos/_handler.js');
   const origSecret = process.env.JWT_SECRET;
   process.env.JWT_SECRET = SECRET;
 
@@ -163,7 +163,7 @@ grupo('[6] Todos os ramos do catch-all exigem JWT (sem auth → 401)');
 // ── [6b] Todos os ramos de /api/parcelas exigem JWT ──────────────────────────
 grupo('[6b] Todos os ramos do catch-all parcelas exigem JWT (sem auth → 401)');
 {
-  const handler = require('../api/parcelas/[[...params]].js');
+  const handler = require('../api/parcelas/_handler.js');
   const origSecret = process.env.JWT_SECRET;
   process.env.JWT_SECRET = SECRET;
 
@@ -230,8 +230,8 @@ grupo('[8] Estrutural: handlers /api/ chamam verificarRequisicao ou são whiteli
     'api/cron/_calcularEvento.js',
     'api/cron/_emailAdapter.js',
     'api/cron/_email_gmail.js',
-    'api/acordos/index.js',       // wrapper de roteamento; auth está no [[...params]].js
-    'api/parcelas/index.js',      // wrapper de roteamento; auth está no [[...params]].js
+    'api/acordos/index.js',       // wrapper de roteamento; auth está no _handler.js
+    'api/parcelas/index.js',      // wrapper de roteamento; auth está no _handler.js
     'api/solicitar-reset.js',     // endpoint público: usuário está bloqueado, sem JWT
     'api/confirmar-reset.js',     // endpoint público: valida token do e-mail, não JWT
     'api/cron/lembretes.js',      // auth via CRON_SECRET no header Authorization, não JWT
@@ -266,6 +266,39 @@ grupo('[8] Estrutural: handlers /api/ chamam verificarRequisicao ou são whiteli
   } else {
     semAuth.forEach(f => assert(`${f} sem verificação de auth`, false));
   }
+
+  // Os módulos privados _handler.js são pulados pela varredura (prefixo _), mas
+  // são onde a auth de /api/acordos/* e /api/parcelas/* de fato acontece — os
+  // index.js só roteiam. Sem esta checagem, apagar a auth deles passaria batido.
+  for (const rel of ['acordos/_handler.js', 'parcelas/_handler.js']) {
+    const abs = path.join(apiDir, rel);
+    assert(`api/${rel} existe`, fs.existsSync(abs));
+    const src = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : '';
+    assert(`api/${rel} verifica autenticação`, src.includes('verificarRequisicaoComBanco'));
+  }
+
+  // O wrapper precisa delegar ao módulo privado — se voltar a apontar para um
+  // arquivo que vira função própria, o limite de 12 do Hobby estoura de novo.
+  for (const rel of ['acordos/index.js', 'parcelas/index.js']) {
+    const src = fs.readFileSync(path.join(apiDir, rel), 'utf8');
+    assert(`api/${rel} delega para ./_handler`, src.includes("require('./_handler')"));
+  }
+}
+
+// ── [9] Limite de 12 funções serverless do plano Hobby ────────────────────────
+grupo('[9] Contagem de funções serverless (limite 12 no Hobby)');
+{
+  function contarFuncoes(dir, base = '') {
+    let n = 0;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('_')) continue;   // módulo privado: não vira função
+      if (entry.isDirectory()) { n += contarFuncoes(path.join(dir, entry.name), path.join(base, entry.name)); continue; }
+      if (entry.name.endsWith('.js')) n++;
+    }
+    return n;
+  }
+  const total = contarFuncoes(path.join(__dirname, '../api'));
+  assert(`${total} funções em api/ — cabe no limite de 12 do Hobby`, total <= 12);
 }
 
 // ── Resultado ─────────────────────────────────────────────────────────────────

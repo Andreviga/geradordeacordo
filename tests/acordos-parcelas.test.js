@@ -43,7 +43,7 @@ const authMod = require('../api/_auth');
 authMod.verificarRequisicaoComBanco = async () => ({ sub: 'user-1', papel: 'admin', email: 'a@b.c' });
 authMod.applyCors = () => {};
 
-const handler = require('../api/acordos/[[...params]]');
+const handler = require('../api/acordos/_handler');
 
 function chamar(body) {
   queriesExecutadas = [];

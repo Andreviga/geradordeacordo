@@ -1,20 +1,20 @@
 'use strict';
-// Por que este arquivo existe:
-//   O Vercel NÃO roteia `[[...params]].js` fora do Next.js — catch-all opcional é
-//   convenção do Next, não do roteamento por sistema de arquivos de /api. Sem um
-//   index.js na pasta, TODAS as rotas /api/parcelas/* respondiam 404 em produção
-//   (confirmado: OPTIONS /api/parcelas/<uuid>/baixar → 404, enquanto
-//   OPTIONS /api/acordos → 204, pasta que já tinha o wrapper).
-//   Efeito prático: os botões de baixa e estorno da tela "Parcelas vencidas"
-//   ([index.html] → /api/parcelas/:id/baixar e /estornar) não funcionavam.
+// Única função serverless de /api/parcelas/* — atende a raiz e as sub-rotas.
 //
-//   Este wrapper extrai os segmentos do req.url e os injeta como req.query.params
-//   antes de delegar ao handler do catch-all — mesmo padrão de api/acordos/index.js.
+// Antes desta correção, TODAS as rotas /api/parcelas/* respondiam 404 em produção
+// e os botões de baixa e estorno da tela "Parcelas vencidas" não funcionavam.
+// Causa: a pasta só tinha `[[...params]].js`, e o Vercel não roteia catch-all
+// opcional fora do Next.js. Confirmado em produção:
+//   OPTIONS /api/parcelas/<uuid>/baixar → 404   (só tinha o catch-all)
+//   OPTIONS /api/acordos                → 204   (tinha este mesmo wrapper)
 //
-// Para remover este arquivo com segurança:
-//   1. Confirmar que o runtime do Vercel passou a rotear [[...params]] em /api.
-//   2. Testar POST /api/parcelas/<uuid>/baixar e confirmar que não retorna 404.
-const handler = require('./[[...params]]');
+// A lógica mora em _handler.js: além de não rotear, cada .js em api/ conta no
+// limite de 12 funções do plano Hobby — o catch-all gastava uma vaga sem atender
+// requisição nenhuma. O prefixo `_` faz dele módulo privado, carregado por require.
+//
+// Este wrapper extrai os segmentos do req.url e os injeta como req.query.params
+// antes de delegar. A autenticação é verificada dentro do _handler.js.
+const handler = require('./_handler');
 module.exports = (req, res) => {
   const path  = (req.url || '').split('?')[0];
   const after = path.replace(/^\/api\/parcelas\/?/, '');
