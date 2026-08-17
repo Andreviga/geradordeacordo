@@ -324,6 +324,10 @@ async function atualizar(req, res, id, user) {
   if (!versaoCliente)
     return res.status(400).json({ erro: 'Campo _versao obrigatório. Recarregue o acordo e tente novamente.', code: 'VERSAO_AUSENTE' });
 
+  const novasParcelas = Array.isArray(b.parcelas) ? b.parcelas : [];
+  if (novasParcelas.some(p => !Number.isInteger(Number(p.numero)) || Number(p.numero) <= 0))
+    return res.status(400).json({ erro: 'Cada parcela precisa de numero inteiro positivo' });
+
   await withTransaction(async (db) => {
     const { rows } = await db.query(
       'SELECT id, assinado_em, cancelado, atualizado_em FROM acordos WHERE id = $1 FOR UPDATE NOWAIT', [id]
@@ -338,9 +342,6 @@ async function atualizar(req, res, id, user) {
       throw Object.assign(new Error('Acordo foi modificado por outro usuário. Recarregue e tente novamente.'),
         { status: 409, code: 'VERSAO_DESATUALIZADA' });
 
-    if (rows[0].atualizado_em instanceof Error && rows[0].atualizado_em.code === '55P03')
-      throw Object.assign(new Error('Acordo em uso por outro usuário. Tente novamente.'), { status: 409 });
-
     const a = b.acordo;
     await db.query(
       `UPDATE acordos SET valor_total_cts=$1,entrada_cts=$2,n_parcelas=$3,valor_parcela_cts=$4,
@@ -352,10 +353,38 @@ async function atualizar(req, res, id, user) {
        a.honorariosPct||null, a.indiceCorrecao||null, a.origemDivida||null, a.periodoReferencia||null,
        a.foro||null, a.modoAssinatura||'fisico', id]
     );
-    await db.query('DELETE FROM parcelas WHERE acordo_id = $1', [id]);
-    for (const p of (b.parcelas || []))
-      await db.query('INSERT INTO parcelas (acordo_id,numero,vencimento,valor_previsto_cts) VALUES ($1,$2,$3,$4)',
-        [id, p.numero, p.vencimento, p.valorPrevistoCts]);
+    // ── Parcelas: upsert por (acordo_id, numero) — nunca DELETE cego ────────
+    // valor_pago_cts, data_pagamento, forma_pagamento, registrado_por e os campos
+    // de estorno são FATOS registrados na baixa. Um DELETE+INSERT aqui apagaria
+    // silenciosamente o histórico de pagamento ao editar um vencimento — e nada
+    // no sistema escreve em assinado_em, então a trava acima nunca protegeu
+    // acordos físicos nem importações retroativas (que já nascem com baixas).
+    const numeros = novasParcelas.map(p => Number(p.numero));
+
+    const { rows: pagasRemovidas } = await db.query(
+      `SELECT numero FROM parcelas
+        WHERE acordo_id = $1 AND valor_pago_cts IS NOT NULL
+          AND NOT (numero = ANY($2::int[]))
+        ORDER BY numero`, [id, numeros]
+    );
+    if (pagasRemovidas.length > 0)
+      throw Object.assign(
+        new Error(`Parcela(s) ${pagasRemovidas.map(r => r.numero).join(', ')} têm pagamento registrado e não podem ser removidas. Estorne a baixa antes de editar.`),
+        { status: 409, code: 'PARCELA_PAGA_REMOVIDA' }
+      );
+
+    await db.query(
+      'DELETE FROM parcelas WHERE acordo_id = $1 AND NOT (numero = ANY($2::int[]))', [id, numeros]
+    );
+
+    for (const p of novasParcelas)
+      await db.query(
+        `INSERT INTO parcelas (acordo_id,numero,vencimento,valor_previsto_cts) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (acordo_id, numero) DO UPDATE
+           SET vencimento = EXCLUDED.vencimento,
+               valor_previsto_cts = EXCLUDED.valor_previsto_cts`,
+        [id, p.numero, p.vencimento, p.valorPrevistoCts]
+      );
   });
   return res.status(200).json({ id, ok: true });
 }
