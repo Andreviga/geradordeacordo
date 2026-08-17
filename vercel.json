@@ -1,8 +1,10 @@
 {
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/api/acordos/:rota*",  "destination": "/api/acordos?_rota=:rota*"  },
-    { "source": "/api/parcelas/:rota*", "destination": "/api/parcelas?_rota=:rota*" }
+    { "source": "/api/acordos/:seg1",       "destination": "/api/acordos?_seg1=:seg1"              },
+    { "source": "/api/acordos/:seg1/:seg2", "destination": "/api/acordos?_seg1=:seg1&_seg2=:seg2"  },
+    { "source": "/api/parcelas/:seg1",       "destination": "/api/parcelas?_seg1=:seg1"             },
+    { "source": "/api/parcelas/:seg1/:seg2", "destination": "/api/parcelas?_seg1=:seg1&_seg2=:seg2" }
   ],
   "headers": [
     {

@@ -32,14 +32,25 @@ grupo('[1] vercel.json tem rewrite de sub-rota para cada recurso com sub-rotas')
 {
   const rewrites = vercel.rewrites || [];
   for (const recurso of ['acordos', 'parcelas']) {
-    const r = rewrites.find(x => x.source && x.source.startsWith(`/api/${recurso}/`));
-    assert(`${recurso}: rewrite declarado`, !!r);
-    if (!r) continue;
-    assert(`${recurso}: captura o resto do caminho`, /:rota\*/.test(r.source));
-    assert(`${recurso}: destino é o próprio recurso`, r.destination.startsWith(`/api/${recurso}?`));
-    assert(`${recurso}: repassa o caminho em _rota`, /_rota=:rota\*/.test(r.destination));
-    // A raiz não pode ser engolida pelo rewrite (o source exige um segmento a mais)
-    assert(`${recurso}: rewrite não casa a raiz`, r.source !== `/api/${recurso}`);
+    const um   = rewrites.find(x => x.source === `/api/${recurso}/:seg1`);
+    const dois = rewrites.find(x => x.source === `/api/${recurso}/:seg1/:seg2`);
+
+    assert(`${recurso}: rewrite de 1 segmento`,  !!um);
+    assert(`${recurso}: rewrite de 2 segmentos`, !!dois);
+    if (!um || !dois) continue;
+
+    assert(`${recurso}: 1 segmento vai para o recurso`,  um.destination   === `/api/${recurso}?_seg1=:seg1`);
+    assert(`${recurso}: 2 segmentos vão para o recurso`, dois.destination === `/api/${recurso}?_seg1=:seg1&_seg2=:seg2`);
+
+    // Segmento repetido (:x*) na querystring do destino é recusado pelo
+    // path-to-regexp do Vercel — "Can not repeat without a prefix and suffix".
+    // O build passa mesmo assim e só quebra em execução, então travar aqui.
+    for (const r of rewrites)
+      assert(`sem parâmetro repetido em "${r.destination}"`, !/:[A-Za-z_]+\*/.test(r.destination.split('?')[1] || ''));
+
+    // A raiz não pode ser engolida: o source sempre exige ao menos um segmento
+    assert(`${recurso}: rewrite não casa a raiz`,
+      !rewrites.some(x => x.source === `/api/${recurso}`));
   }
 }
 
@@ -47,12 +58,12 @@ grupo('[1] vercel.json tem rewrite de sub-rota para cada recurso com sub-rotas')
 grupo('[2] segmentosDaRota lê as três origens possíveis');
 {
   // Produção: o rewrite põe o caminho em _rota
-  assert('_rota com um segmento',
-    JSON.stringify(segmentosDaRota({ query: { _rota: 'abc-123' } }, 'acordos')) === '["abc-123"]');
-  assert('_rota com dois segmentos',
-    JSON.stringify(segmentosDaRota({ query: { _rota: 'abc-123/cancelar' } }, 'acordos')) === '["abc-123","cancelar"]');
-  assert('_rota como array',
-    JSON.stringify(segmentosDaRota({ query: { _rota: ['abc', 'baixar'] } }, 'parcelas')) === '["abc","baixar"]');
+  assert('_seg1 com um segmento',
+    JSON.stringify(segmentosDaRota({ query: { _seg1: 'abc-123' } }, 'acordos')) === '["abc-123"]');
+  assert('_seg1 + _seg2',
+    JSON.stringify(segmentosDaRota({ query: { _seg1: 'abc-123', _seg2: 'cancelar' } }, 'acordos')) === '["abc-123","cancelar"]');
+  assert('segmentos com barra em _seg1',
+    JSON.stringify(segmentosDaRota({ query: { _seg1: 'abc', _seg2: 'baixar' } }, 'parcelas')) === '["abc","baixar"]');
 
   // Runtime preenchendo params por conta própria
   assert('params do runtime',
@@ -67,8 +78,8 @@ grupo('[2] segmentosDaRota lê as três origens possíveis');
   // Raiz do recurso → nenhum segmento (é o que separa listar de buscar)
   assert('raiz sem segmentos (url)',   JSON.stringify(segmentosDaRota({ url: '/api/acordos' }, 'acordos')) === '[]');
   assert('raiz sem segmentos (vazio)', JSON.stringify(segmentosDaRota({ query: {} }, 'acordos')) === '[]');
-  assert('_rota vazio não vira segmento',
-    JSON.stringify(segmentosDaRota({ query: { _rota: '' }, url: '/api/acordos' }, 'acordos')) === '[]');
+  assert('_seg1 vazio não vira segmento',
+    JSON.stringify(segmentosDaRota({ query: { _seg1: '' }, url: '/api/acordos' }, 'acordos')) === '[]');
 }
 
 // ── [3] ───────────────────────────────────────────────────────────────────────
@@ -129,8 +140,8 @@ grupo('[5] Comportamento real do wrapper com o payload do rewrite');
   const wrapper = require('../api/parcelas/index.js');
   const req = {
     method: 'POST', headers: {}, body: {},
-    url: '/api/parcelas?_rota=00000000-0000-0000-0000-000000000001/baixar',
-    query: { _rota: '00000000-0000-0000-0000-000000000001/baixar' },
+    url: '/api/parcelas?_seg1=00000000-0000-0000-0000-000000000001&_seg2=baixar',
+    query: { _seg1: '00000000-0000-0000-0000-000000000001', _seg2: 'baixar' },
     setHeader: () => {},
   };
   let status = null;
