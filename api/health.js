@@ -148,7 +148,51 @@ module.exports = async (req, res) => {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error_description || d.error);
 
-      resultado.drive = { ok: true, service_account: sa.client_email, msg: 'Credencial válida' };
+      // Emitir o token NÃO prova que o Drive funciona: ele é emitido pelo
+      // oauth2.googleapis.com, que responde mesmo com a Drive API desativada no
+      // projeto. Foi exatamente esse falso-verde que deixou o backup falhar com
+      // 403 "Drive API has not been used in project" enquanto o health dizia
+      // "Credencial válida". Agora consulta as pastas de verdade.
+      const pastas = {
+        DRIVE_PDF_FOLDER_ID:    process.env.DRIVE_PDF_FOLDER_ID,
+        DRIVE_BACKUP_FOLDER_ID: process.env.DRIVE_BACKUP_FOLDER_ID,
+      };
+      const acesso = {};
+      let algumProblema = null;
+
+      for (const [nome, id] of Object.entries(pastas)) {
+        if (!id) { acesso[nome] = 'não configurada'; continue; }
+        const u = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}`
+                + '?fields=id,name,mimeType&supportsAllDrives=true';
+        const rp = await fetch(u, { headers: { Authorization: `Bearer ${d.access_token}` } });
+        if (rp.ok) {
+          const meta = await rp.json();
+          acesso[nome] = `ok — "${meta.name}"`;
+          continue;
+        }
+        const corpo = await rp.text();
+        if (/has not been used in project|is disabled/i.test(corpo)) {
+          acesso[nome] = 'Drive API desativada no projeto GCP';
+          algumProblema = 'A Google Drive API está desativada no projeto — ative no console do Google.';
+        } else if (rp.status === 404) {
+          acesso[nome] = 'pasta não encontrada — compartilhe com a service account';
+          algumProblema = `${nome}: a service account não enxerga a pasta. Compartilhe com ${sa.client_email}.`;
+        } else {
+          acesso[nome] = `HTTP ${rp.status}`;
+          algumProblema = `${nome}: Drive respondeu ${rp.status}.`;
+        }
+      }
+
+      resultado.drive = {
+        ok: !algumProblema,
+        service_account: sa.client_email,
+        pastas: acesso,
+        msg: algumProblema || 'Credencial válida e pastas acessíveis',
+      };
+      if (algumProblema) {
+        resultado.ok = false;
+        resultado.avisos = [...(resultado.avisos || []), algumProblema];
+      }
     } catch (err) {
       resultado.drive = { ok: false, msg: `Credencial inválida: ${err.message}` };
       resultado.ok    = false;
