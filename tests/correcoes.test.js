@@ -153,10 +153,15 @@ async function main() {
   grupo('[4] Listagem informa o total e navega por páginas');
   {
     await db.query('TRUNCATE acordos CASCADE');
+    // criado_em explícito e distinto: inseridos em sequência, os 7 caem no mesmo
+    // instante e o empate torna a ordem — e portanto o corte entre páginas —
+    // indeterminado. Foi assim que este teste falhou de forma intermitente no
+    // pre-push, o que revelou a falta de desempate estável na consulta.
     for (let i = 1; i <= 7; i++) {
       await db.query(
-        `INSERT INTO acordos (numero,valor_total_cts,modo_assinatura,criado_por)
-         VALUES ($1,100000,'fisico',$2)`, [`2026/${String(i).padStart(3, '0')}`, USER]);
+        `INSERT INTO acordos (numero,valor_total_cts,modo_assinatura,criado_por,criado_em)
+         VALUES ($1,100000,'fisico',$2, NOW() - ($3 || ' minutes')::interval)`,
+        [`2026/${String(i).padStart(3, '0')}`, USER, String(i)]);
     }
 
     let r = await chamar('GET', { limite: '3', pagina: '1' });
@@ -189,6 +194,16 @@ async function main() {
 
     r = await chamar('GET', { status: 'quitado' });
     assert('total respeita o filtro', r._body.total === 0);
+
+    // Percorrer todas as páginas tem de devolver cada acordo exatamente uma vez.
+    // Sem desempate estável na ORDER BY isto falha quando há empate de data.
+    const vistos = [];
+    for (let p = 1; p <= 4; p++) {
+      const pag = await chamar('GET', { limite: '2', pagina: String(p) });
+      vistos.push(...pag._body.acordos.map(a => a.numero));
+    }
+    assert('varrer as páginas não repete nem perde acordo',
+      vistos.length === 7 && new Set(vistos).size === 7);
   }
 
   await db.close();

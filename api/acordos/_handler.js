@@ -133,7 +133,10 @@ async function listar(req, res) {
                   WHERE aa2.acordo_id = a.id AND al2.nome ILIKE '%'||$1||'%')
      )
      AND ($2::text IS NULL OR acs.status = $2::text)
-     ORDER BY acs.proximo_vencimento NULLS LAST, a.criado_em DESC
+     -- a.id como último critério: sem um desempate estável, dois acordos com o
+     -- mesmo vencimento e mesmo criado_em podem trocar de lugar entre uma página
+     -- e outra, fazendo um registro aparecer duas vezes e outro sumir.
+     ORDER BY acs.proximo_vencimento NULLS LAST, a.criado_em DESC, a.id
      LIMIT $3 OFFSET $4`,
     [busca, status, limite, (pagina - 1) * limite]
   );
