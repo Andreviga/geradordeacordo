@@ -453,11 +453,55 @@ nunca a proteção.
 > O campo `email` é `UNIQUE` e é o login. Use o e-mail real da pessoa,
 > não o e-mail de notificações (`notificacoesraizes@gmail.com`).
 
-### Retenção de dados (pendente)
+## Retenção de dados pessoais (LGPD)
 
-- Defina prazo de retenção antes de colocar em produção (sugestão: 5 anos após quitação
-  ou conforme orientação jurídica e PROCON).
-- A exclusão automática por rotina agendada ainda **não** foi implementada.
+Existe uma rotina de expurgo. Ela **não está agendada** — roda só quando alguém pede.
+
+```bash
+npm run cron:retencao              # ensaio: lista quem seria anonimizado
+npm run cron:retencao -- --anos=7  # ensaio com outro prazo
+npm run cron:retencao -- --aplicar # apaga de verdade (pede confirmação digitada)
+```
+
+### O que ela faz
+
+Apaga **nome, CPF, RG, endereço, e-mail e telefone** de devedores e alunos ligados
+apenas a acordos encerrados há mais de N anos, e limpa o `snapshot_assinatura_json`
+desses acordos.
+
+A linha **não** é excluída, e o acordo, as parcelas e as baixas continuam
+intactos: some o dado pessoal, fica o registro financeiro. A linha é marcada com
+`anonimizado_em`, e cada expurgo entra em `auditoria_exclusoes`.
+
+### Quem é preservado
+
+Uma pessoa só é anonimizada quando **todos** os acordos dela estão encerrados
+(`quitado` ou `cancelado`) e vencidos de prazo. Um único acordo em aberto,
+inadimplente ou encerrado há pouco preserva o cadastro inteiro.
+
+O prazo conta a partir do último fato do acordo: o último pagamento; na falta
+dele, o último vencimento; na falta dos dois, a última atualização.
+
+### O prazo
+
+Padrão de **5 anos**, configurável em `RETENCAO_ANOS`. O número vem da orientação
+usual de 5 anos após a quitação (prescrição do CDC).
+
+> ⚠️ **Isso é decisão jurídica do colégio, não do software.** Confirme o prazo com
+> a assessoria antes de aplicar pela primeira vez. A anonimização é irreversível:
+> o dado não volta, nem por backup já rotacionado.
+
+### Antes de agendar
+
+Rode o ensaio, confira a lista, aplique uma vez à mão. Só depois, se quiser
+automatizar, acrescente ao `vercel.json`:
+
+```json
+{ "path": "/api/cron/retencao?aplicar=1", "schedule": "0 5 1 * *" }
+```
+
+Sem `aplicar=1` o endpoint responde o ensaio e não altera nada — uma chamada
+acidental, ou um agendamento posto sem querer, não apaga nada.
 
 ### Política de retry da ZapSign
 

@@ -151,8 +151,13 @@ function applyCors(req, res) {
     return;
   }
 
-  const allowed = raw.split(',').map(s => s.trim()).filter(Boolean);
-  const matched = allowed.find(a => origin.startsWith(a));
+  // Comparação exata, não por prefixo: com startsWith, ALLOWED_ORIGIN
+  // "https://gerador-acordo.vercel.app" deixava passar
+  // "https://gerador-acordo.vercel.app.dominio-do-atacante.com".
+  // A barra final é normalizada dos dois lados para não virar pegadinha de config.
+  const semBarra = s => s.replace(/\/+$/, '');
+  const allowed  = raw.split(',').map(s => semBarra(s.trim())).filter(Boolean);
+  const matched  = allowed.includes(semBarra(origin));
   if (matched) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');

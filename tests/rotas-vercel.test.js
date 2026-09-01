@@ -104,7 +104,7 @@ grupo('[4] Handlers de cron aceitam GET (é como o scheduler do Vercel dispara)'
   delete process.env.CRON_SECRET;
   const pendentes = [];
   const cronHandler = require(path.join(raiz, 'api/cron/index.js'));
-  for (const job of ['lembretes', 'backup']) {
+  for (const job of ['lembretes', 'backup', 'retencao']) {
     let status = null;
     const res = { status(c) { status = c; return this; }, json() { return this; }, end() { return this; } };
     pendentes.push(

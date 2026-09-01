@@ -2824,6 +2824,7 @@ async function confirmarImportar(){
 }
 
 let _listagemAberta=false;
+let _listaPagina=1;
 async function abrirListagem(){
   if(_listagemAberta) return;
   _listagemAberta=true;
@@ -2847,7 +2848,7 @@ async function abrirListagem(){
     </div>`;
     document.body.appendChild(overlay);
     $('listBusca').addEventListener('input',_debounceLista);
-    $('listStatus').addEventListener('change',carregarLista);
+    $('listStatus').addEventListener('change',()=>{_listaPagina=1;carregarLista();});
   }
   overlay.style.display='flex';
   await carregarLista();
@@ -2858,7 +2859,7 @@ function fecharListagem(){
   _listagemAberta=false;
 }
 let _listaTimer=null;
-const _debounceLista=()=>{clearTimeout(_listaTimer);_listaTimer=setTimeout(carregarLista,350);};
+const _debounceLista=()=>{clearTimeout(_listaTimer);_listaTimer=setTimeout(()=>{_listaPagina=1;carregarLista();},350);};
 
 async function carregarLista(){
   const tabela=$('listTabela');
@@ -2867,9 +2868,9 @@ async function carregarLista(){
   try{
     const b=encodeURIComponent($('listBusca')?.value||'');
     const s=encodeURIComponent($('listStatus')?.value||'');
-    const r=await fetch(`/api/acordos?busca=${b}&status=${s}`,{headers:apiHeaders()});
+    const r=await fetch(`/api/acordos?busca=${b}&status=${s}&pagina=${_listaPagina}&limite=50`,{headers:apiHeaders()});
     if(!r.ok) throw new Error((await r.json()).erro||`Erro ${r.status}`);
-    const {acordos}=await r.json();
+    const {acordos,total,pagina,paginas}=await r.json();
     if(!acordos.length){tabela.innerHTML='<p style="color:var(--ink-2);padding:20px">Nenhum acordo encontrado.</p>';return;}
     const fmt=v=>v?'R$ '+(v/100).toLocaleString('pt-BR',{minimumFractionDigits:2}):'—';
     const fmtDt=s=>s?new Date(s).toLocaleDateString('pt-BR'):'—';
@@ -2898,11 +2899,27 @@ async function carregarLista(){
         </td>
         <td style="padding:8px 6px">${a.drive_file_id?`<a href="#" onclick="event.stopPropagation();abrirPdfDrive('${a.drive_file_id}')" style="color:var(--seal)">PDF</a>`:''}</td>
       </tr>`).join('')}</tbody>
-    </table>`;
+    </table>${rodapeLista(acordos.length,total,pagina,paginas)}`;
   }catch(err){
     tabela.innerHTML=`<p style="color:var(--alert);padding:20px">Erro: ${err.message}</p>`;
   }
 }
+
+// Antes a listagem cortava em 100 sem avisar. Agora sempre diz quantos existem.
+function rodapeLista(nesta,total,pagina,paginas){
+  if(!total) return '';
+  const nav=(rot,alvo,ativo)=>ativo
+    ? `<button class="btn mini" onclick="irParaPagina(${alvo})">${rot}</button>`
+    : `<button class="btn mini ghost" disabled style="opacity:.4">${rot}</button>`;
+  const info = paginas>1
+    ? `Mostrando ${nesta} de ${total} — página ${pagina} de ${paginas}`
+    : `${total} acordo${total>1?'s':''}`;
+  return `<div style="display:flex;align-items:center;gap:8px;padding:12px 6px;border-top:1px solid var(--line)">
+    <span style="flex:1;color:var(--ink-2);font-size:12px">${info}</span>
+    ${paginas>1?nav('‹ anterior',pagina-1,pagina>1)+nav('próxima ›',pagina+1,pagina<paginas):''}
+  </div>`;
+}
+function irParaPagina(p){ _listaPagina=p; carregarLista(); }
 async function verAcordo(id){
   const r=await fetch(`/api/acordos/${id}`,{headers:apiHeaders()});
   const d=await r.json();
