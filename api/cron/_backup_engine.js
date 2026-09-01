@@ -78,7 +78,21 @@ async function deletarArquivo(token, fileId) {
   });
 }
 
-async function uploadGzip(token, nome, bufGzip, pastaId) {
+// Traduz as falhas de Drive que já custaram tempo aqui. O corpo cru do erro do
+// Google é longo e não diz o que fazer; estas três respondem a pergunta certa.
+function explicarErroDrive(status, corpo, pastaId, saEmail) {
+  if (/has not been used in project|is disabled/i.test(corpo))
+    return 'a Google Drive API está desativada no projeto GCP — ative no console do Google.';
+  if (status === 404)
+    return `a service account não enxerga a pasta ${pastaId}. O Drive responde 404 (e não 403) `
+         + `quando não há acesso nenhum. Compartilhe a pasta com ${saEmail || 'a service account'} como Editor.`;
+  if (/storage quota|quotaExceeded/i.test(corpo))
+    return 'a pasta está em "Meu Drive": o arquivo criado fica sob a cota da service account, que é zero. '
+         + 'Use uma pasta em Drive Compartilhado.';
+  return null;
+}
+
+async function uploadGzip(token, nome, bufGzip, pastaId, saEmail) {
   const bound = `DriveBackup${Date.now()}`;
   const meta  = JSON.stringify({ name: nome, mimeType: 'application/gzip',
     ...(pastaId ? { parents: [pastaId] } : {}) });
@@ -93,7 +107,13 @@ async function uploadGzip(token, nome, bufGzip, pastaId) {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${bound}` },
     body,
   });
-  if (!r.ok) throw new Error(`Upload Drive falhou: HTTP ${r.status} — ${(await r.text()).slice(0, 200)}`);
+  if (!r.ok) {
+    const corpo = await r.text();
+    const causa = explicarErroDrive(r.status, corpo, pastaId, saEmail);
+    throw new Error(causa
+      ? `Upload Drive falhou (HTTP ${r.status}): ${causa}`
+      : `Upload Drive falhou: HTTP ${r.status} — ${corpo.slice(0, 200)}`);
+  }
   return await r.json();
 }
 
@@ -139,7 +159,7 @@ async function executarBackup(pool) {
 
   // 3. Upload semanal + retenção (4 semanas)
   const nomeW = `backup-weekly-${isoWeek(agora)}.json.gz`;
-  const fw    = await uploadGzip(token, nomeW, bufGzip, pastaId);
+  const fw    = await uploadGzip(token, nomeW, bufGzip, pastaId, creds.client_email);
   uploads.push({ tipo: 'weekly', nome: fw.name, tamanho: fw.size });
   console.log(`[backup] semanal: ${fw.name} (${fw.size} bytes)`);
 
@@ -153,7 +173,7 @@ async function executarBackup(pool) {
   if (isPrimeiraMondayDoMes(agora)) {
     const mes   = agora.toISOString().slice(0, 7);
     const nomeM = `backup-monthly-${mes}.json.gz`;
-    const fm    = await uploadGzip(token, nomeM, bufGzip, pastaId);
+    const fm    = await uploadGzip(token, nomeM, bufGzip, pastaId, creds.client_email);
     uploads.push({ tipo: 'monthly', nome: fm.name, tamanho: fm.size });
     console.log(`[backup] mensal: ${fm.name} (${fm.size} bytes)`);
 
@@ -167,4 +187,4 @@ async function executarBackup(pool) {
   return { ok: true, totalLinhas, uploads };
 }
 
-module.exports = { executarBackup, TABELAS };
+module.exports = { executarBackup, TABELAS, explicarErroDrive };

@@ -111,5 +111,30 @@ grupo('[3] O backup declara a pasta que ele mesmo exige');
     /DRIVE_BACKUP_FOLDER_ID[\s\S]{0,120}throw/.test(motor));
 }
 
+grupo('[4] As falhas de Drive dizem o que fazer, não só o código HTTP');
+{
+  // As três causas que realmente aconteceram ao pôr o backup de pé. O corpo cru
+  // do erro do Google é longo e não responde "e agora?".
+  const { explicarErroDrive } = require('../api/cron/_backup_engine');
+  const SA = 'conta@projeto.iam.gserviceaccount.com';
+
+  const desativada = explicarErroDrive(403,
+    'Google Drive API has not been used in project 842436282459 before or it is disabled.', 'ID', SA);
+  assert('API desativada é reconhecida', /desativada no projeto GCP/.test(desativada));
+
+  const naoCompartilhada = explicarErroDrive(404, 'File not found: 1blsIKW.', '1blsIKW', SA);
+  assert('404 vira "não enxerga a pasta"', /não enxerga a pasta 1blsIKW/.test(naoCompartilhada));
+  assert('404 explica por que não é 403',  /404 \(e não 403\)/.test(naoCompartilhada));
+  assert('404 diz com qual e-mail compartilhar', naoCompartilhada.includes(SA));
+
+  const cota = explicarErroDrive(403, 'Service Accounts do not have storage quota.', 'ID', SA);
+  assert('cota vira "está em Meu Drive"', /Meu Drive[\s\S]*Drive Compartilhado/.test(cota));
+
+  assert('erro desconhecido não inventa explicação',
+    explicarErroDrive(500, 'boom', 'ID', SA) === null);
+  assert('sem e-mail da SA ainda produz frase útil',
+    /a service account/.test(explicarErroDrive(404, 'x', 'ID', null)));
+}
+
 console.log(`\nResultado: ${passou} ✓  ${falhou} ✗`);
 if (falhou > 0) process.exit(1);
