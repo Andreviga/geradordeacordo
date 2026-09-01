@@ -47,117 +47,96 @@ npm run cron:backup
 - `DATABASE_URL` apontando para o banco de destino (use `.env.local`)
 - Arquivo `.json.gz` do backup (baixado do Drive)
 
-#### Passo 1 — Descompactar o arquivo
+Não é preciso descompactar: o script detecta gzip pelos bytes do arquivo.
+
+#### Passo 1 — Ensaiar (não grava nada)
 
 ```bash
-# macOS/Linux
-gzip -dk backup-weekly-2026-W31.json.gz
-# → gera backup-weekly-2026-W31.json
-
-# Windows (PowerShell)
-[System.IO.Compression.ZipFile]::ExtractToDirectory('backup-weekly-2026-W31.json.gz', '.')
-# ou: use 7-Zip ou WSL com gzip -dk
+npm run db:restore -- backup-weekly-2026-W31.json.gz --dry-run
 ```
 
-#### Passo 2 — Inspecionar o arquivo
+O ensaio roda o restore inteiro — `TRUNCATE`, todos os `INSERT`, conferência de
+contagens — e dá `ROLLBACK` no final. Serve para validar o arquivo contra as
+constraints reais do banco sem alterar nada. Antes de escrever qualquer coisa
+ele já teria recusado se alguma tabela ou coluna do dump não existisse no destino.
+
+A saída mostra o que seria substituído:
+
+```
+  tabela                    hoje →  do backup
+  usuarios                     1 →          1
+  acordos                     12 →        347
+  parcelas                   140 →       4108
+  TOTAL                      153 →       4456
+```
+
+#### Passo 2 — Restaurar para valer
 
 ```bash
-node -e "const d=require('./backup-weekly-2026-W31.json'); console.log('Gerado em:', d._meta.gerado_em); Object.entries(d.dados).forEach(([t,r])=>console.log(t+':',r.length,'linhas'))"
+npm run db:restore -- backup-weekly-2026-W31.json.gz
 ```
 
-Confirme que as tabelas e quantidades fazem sentido antes de restaurar.
+O script pede que você **digite o host do banco** para confirmar. Isso existe
+para não restaurar em produção por engano — colar o comando não basta, é preciso
+reconhecer o destino.
 
-#### Passo 3 — Restaurar o banco
+Tudo roda numa transação. Se as contagens finais não baterem com o backup, ele
+dá `ROLLBACK` sozinho e o banco fica intacto.
 
-```bash
-# Cria e roda o script de restore inline
-node -e "
-const fs = require('fs');
-require('./scripts/db-utils').loadEnv();
-const { getPool } = require('./api/_db');
-
-async function main() {
-  const dump = JSON.parse(fs.readFileSync('./backup-weekly-2026-W31.json', 'utf8'));
-  const pool = getPool();
-  const client = await pool.connect();
-
-  await client.query('BEGIN');
-  try {
-    // Desativa FKs temporariamente
-    await client.query('SET CONSTRAINTS ALL DEFERRED');
-
-    for (const [tabela, linhas] of Object.entries(dump.dados)) {
-      if (!linhas.length) continue;
-      await client.query('TRUNCATE ' + tabela + ' CASCADE');
-      const cols = Object.keys(linhas[0]);
-      for (const linha of linhas) {
-        const vals = cols.map((c, i) => '$' + (i + 1));
-        await client.query(
-          'INSERT INTO ' + tabela + ' (' + cols.join(',') + ') VALUES (' + vals.join(',') + ')',
-          cols.map(c => linha[c])
-        );
-      }
-      console.log(tabela + ': ' + linhas.length + ' linhas restauradas');
-    }
-
-    await client.query('COMMIT');
-    console.log('\\nRestore concluído com sucesso.');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-    await pool.end();
-  }
-}
-
-main().catch(e => { console.error(e.message); process.exit(1); });
-"
-```
-
-#### Passo 4 — Verificar integridade após restore
+#### Passo 3 — Verificar
 
 ```bash
 npm run db:status
 ```
 
-Deve mostrar todas as tabelas presentes e sem erros de constraint.
-
 #### Restore parcial (apenas uma tabela)
 
 ```bash
-node -e "
-const fs = require('fs');
-require('./scripts/db-utils').loadEnv();
-const { getPool } = require('./api/_db');
-const dump = JSON.parse(fs.readFileSync('./backup-weekly-2026-W31.json', 'utf8'));
-const tabela = 'acordos';  // ← altere aqui
-const linhas = dump.dados[tabela];
-const pool = getPool();
-pool.connect().then(async client => {
-  await client.query('BEGIN');
-  await client.query('TRUNCATE ' + tabela + ' CASCADE');
-  const cols = Object.keys(linhas[0] || {});
-  for (const l of linhas) {
-    const vals = cols.map((c,i) => '\$'+(i+1));
-    await client.query('INSERT INTO '+tabela+' ('+cols.join(',')+') VALUES ('+vals.join(',')+')', cols.map(c=>l[c]));
-  }
-  await client.query('COMMIT');
-  console.log(linhas.length + ' linhas restauradas em ' + tabela);
-  client.release(); await pool.end();
-}).catch(e => { console.error(e.message); process.exit(1); });
-"
+npm run db:restore -- backup-weekly-2026-W31.json.gz --tabela=acordos
 ```
+
+> ⚠️ `TRUNCATE ... CASCADE` numa tabela pai apaga as filhas, que **não** serão
+> repostas no modo parcial. Restaurar só `acordos` esvazia `parcelas`. O script
+> avisa antes de pedir a confirmação.
+
+#### Opções
+
+| Opção | Efeito |
+|---|---|
+| `--dry-run` | ensaio completo com `ROLLBACK` no fim |
+| `--sim` | pula a confirmação digitada (automação) |
+| `--tabela=<nome>` | restaura só essa tabela; pode repetir |
 
 ### Restore de teste trimestral
 
-Procedimento a executar a cada 3 meses no banco de testes (`BANCO_TESTE_HOST`):
+O teste que antes era manual virou script, e roda junto com `npm test`:
 
-1. Baixar o backup mensal mais recente do Drive.
-2. Apontar `DATABASE_URL` para o banco de testes no `.env.local`.
-3. Executar o Passo 3 acima contra o banco de testes.
-4. Rodar `npm run db:status` e `npm test` — todos os testes devem passar.
-5. Documentar a data e resultado (ex: "Restore testado em 2026-10-05, 347 acordos, OK").
+```bash
+npm run test:restore
+```
+
+Ele semeia dados cobrindo as 13 tabelas (JSONB, datas, BIGINT em centavos, FKs,
+acentuação), gera um backup no formato exato do cron, destrói e adultera os
+dados, restaura com o mesmo núcleo do `db:restore` e compara linha a linha com o
+original.
+
+Por padrão usa **PGlite** — PostgreSQL 18 compilado para WASM, rodando dentro do
+próprio processo. Não precisa de Docker, servidor nem rede, então roda igual em
+qualquer máquina e em CI.
+
+Para conferir contra o Postgres real de tempos em tempos:
+
+```bash
+npm run test:restore -- --postgres
+```
+
+Nesse modo ele só aceita `localhost` ou `BANCO_TESTE_HOST` — recusa qualquer
+outro destino, porque apaga dados de propósito. Para um banco descartável em
+outro host, acrescente `--descartavel`.
+
+Registre a data e o resultado a cada execução (ex.: "Restore testado em
+2026-10-05, 347 acordos, OK").
+
 
 ---
 
@@ -426,27 +405,54 @@ usuário pode ser criado depois pela interface.
 
 ---
 
-## Primeiro usuário (cadastro manual)
+## Gestão de usuários
 
-Enquanto não houver tela de gerenciamento, o primeiro usuário é criado via `psql`.
-**Crie como `admin`** — sem um admin, nenhum outro usuário pode ser criado depois.
+O primeiro admin nasce pela linha de comando (`npm run db:criar-admin`). Do segundo
+em diante, tudo acontece na tela: botão **Usuários** na barra superior, visível só
+para quem é admin.
 
-```sql
--- Gere o hash da senha com: npm run hash
-INSERT INTO usuarios (nome, email, hash_senha, papel)
-VALUES (
-  'Nome da Secretaria',
-  'email-real@dominio.com.br',  -- campo UNIQUE; é o login
-  '$2a$10$...',                  -- hash gerado por npm run hash
-  'admin'
-);
-```
+| Ação | Onde |
+|---|---|
+| Criar usuário (nome, e-mail, papel, senha provisória) | tela **Usuários** |
+| Promover a admin / rebaixar a secretaria | tela **Usuários** |
+| Desativar e reativar | tela **Usuários** |
+| Definir nova senha para alguém | tela **Usuários** |
+| Trocar a própria senha esquecida | tela de login → *Esqueci minha senha* |
 
-> O campo `email` é `UNIQUE`. Use o e-mail real da pessoa que vai administrar o sistema,
+Papéis (o banco só aceita estes dois):
+
+- **`secretaria`** — usa o sistema no dia a dia: cria acordos, dá baixa, consulta.
+- **`admin`** — tudo isso, mais gerenciar usuários e cancelar acordos.
+
+### Desativar em vez de excluir
+
+Não existe exclusão de usuário, de propósito: `acordos.criado_por` referencia
+`usuarios(id)`, e apagar a linha destruiria a autoria dos acordos já emitidos.
+Desativar resolve o que importa — o acesso é cortado **na hora**, mesmo se a pessoa
+estiver com uma sessão aberta, porque o `ativo` é reconferido no banco a cada
+requisição. Toda desativação fica registrada em `auditoria_exclusoes`.
+
+### Travas contra ficar sem administrador
+
+O sistema recusa, com `409`, qualquer operação que deixasse ninguém no comando:
+
+- desativar a própria conta;
+- rebaixar a própria conta;
+- desativar ou rebaixar o **último admin ativo**, mesmo sendo outra pessoa fazendo.
+
+Sem isso, um clique distraído exigiria acesso por linha de comando para consertar.
+A tela também esconde os botões correspondentes, mas a decisão é sempre do servidor:
+o papel é relido do banco a cada requisição, então esconder botão é conveniência,
+nunca a proteção.
+
+> O campo `email` é `UNIQUE` e é o login. Use o e-mail real da pessoa,
 > não o e-mail de notificações (`notificacoesraizes@gmail.com`).
+
+### Retenção de dados (pendente)
+
 - Defina prazo de retenção antes de colocar em produção (sugestão: 5 anos após quitação
   ou conforme orientação jurídica e PROCON).
-- A Fase E implementará exclusão automática via rotina agendada.
+- A exclusão automática por rotina agendada ainda **não** foi implementada.
 
 ### Política de retry da ZapSign
 

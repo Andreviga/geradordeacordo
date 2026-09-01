@@ -167,4 +167,4 @@ async function executarBackup(pool) {
   return { ok: true, totalLinhas, uploads };
 }
 
-module.exports = { executarBackup };
+module.exports = { executarBackup, TABELAS };
