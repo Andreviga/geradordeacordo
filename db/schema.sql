@@ -424,3 +424,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_lembretes_interno_unico
   WHERE canal = 'interno_d15';
 
 COMMIT;
+
+-- O RA é o identificador do aluno no colégio: quando presente, não se repete.
+-- Protege contra corrida entre dois salvamentos simultâneos; a deduplicação
+-- normal acontece em processarAlunos (api/acordos/_handler.js).
+-- Em DO block para que um banco legado com RA duplicado avise em vez de abortar
+-- a migração inteira.
+DO $$
+BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_alunos_ra ON alunos(ra) WHERE ra IS NOT NULL;
+EXCEPTION WHEN unique_violation OR duplicate_table THEN
+  RAISE NOTICE 'idx_alunos_ra não criado: já existem RAs duplicados em alunos. Limpe antes.';
+END $$;

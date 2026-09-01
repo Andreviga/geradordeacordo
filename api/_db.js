@@ -32,6 +32,33 @@ function _cleanUrl(url) {
   } catch { return url; }
 }
 
+// O Neon hiberna quando fica ocioso. A primeira conexão depois disso acorda o
+// banco e estoura o connectionTimeoutMillis; a seguinte conecta em ~1s. Medido em
+// produção: 1ª tentativa 503 em 5s, 2ª respondeu em 1,1s. Sem isto, quem abre o
+// sistema de manhã leva "Banco indisponível" e precisa clicar em Entrar de novo.
+//
+// Só repete quando a conexão NÃO chegou a ser aberta — aí é certo que o comando
+// não rodou, e repetir é seguro mesmo para INSERT. Erro no meio da consulta
+// (conexão derrubada) não entra aqui: repetir poderia gravar duas vezes.
+function ehFalhaAoConectar(err) {
+  const m = err?.message || '';
+  return err?.code === 'ECONNREFUSED'
+      || err?.code === 'ENOTFOUND'
+      || err?.code === 'ETIMEDOUT'
+      || m.includes('timeout exceeded when trying to connect')
+      || m.includes('Connection terminated due to connection timeout');
+}
+
+async function _comRetry(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!ehFalhaAoConectar(err)) throw err;
+    await new Promise(r => setTimeout(r, 300));
+    return fn();
+  }
+}
+
 function getPool() {
   if (!_pool && process.env.DATABASE_URL) {
     const url = _validateUrl(process.env.DATABASE_URL);
@@ -42,6 +69,11 @@ function getPool() {
       idleTimeoutMillis: 15000,
       connectionTimeoutMillis: 5000,
     });
+    // 5s + 300ms + ~1s de reconexão cabe folgado no limite de execução da função
+    const queryOriginal = _pool.query.bind(_pool);
+    _pool.query = (...args) => _comRetry(() => queryOriginal(...args));
+    const connectOriginal = _pool.connect.bind(_pool);
+    _pool.connect = (...args) => _comRetry(() => connectOriginal(...args));
   }
   return _pool;
 }
@@ -78,4 +110,4 @@ function isDbUnavailable(err) {
   );
 }
 
-module.exports = { getPool, withTransaction, isDbUnavailable };
+module.exports = { getPool, withTransaction, isDbUnavailable, ehFalhaAoConectar };

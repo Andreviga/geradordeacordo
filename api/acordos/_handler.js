@@ -100,9 +100,16 @@ module.exports = async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // GET /api/acordos — listar
 // ═══════════════════════════════════════════════════════════════════════════════
+const LIMITE_PADRAO = 50;
+const LIMITE_MAXIMO = 200;
+
 async function listar(req, res) {
   const busca  = (req.query?.busca  || '').trim() || null;
   const status = (req.query?.status || '').trim() || null;
+  // Antes havia um LIMIT 100 fixo e sem contagem: passado o centésimo acordo, os
+  // demais simplesmente sumiam da tela, sem nada indicando que existiam.
+  const limite = Math.min(Math.max(parseInt(req.query?.limite, 10) || LIMITE_PADRAO, 1), LIMITE_MAXIMO);
+  const pagina = Math.max(parseInt(req.query?.pagina, 10) || 1, 1);
   const pool = getPool();
   if (!pool) return res.status(503).json({ erro: 'Banco indisponível' });
 
@@ -127,10 +134,34 @@ async function listar(req, res) {
      )
      AND ($2::text IS NULL OR acs.status = $2::text)
      ORDER BY acs.proximo_vencimento NULLS LAST, a.criado_em DESC
-     LIMIT 100`,
+     LIMIT $3 OFFSET $4`,
+    [busca, status, limite, (pagina - 1) * limite]
+  );
+
+  // Mesmo filtro da consulta acima, só que contando — para a tela poder dizer
+  // "mostrando 50 de 347" em vez de calar sobre o resto.
+  const { rows: cnt } = await pool.query(
+    `SELECT COUNT(*)::int AS total
+     FROM acordos_com_status acs JOIN acordos a ON a.id = acs.id
+     WHERE (
+       $1::text IS NULL OR
+       EXISTS (SELECT 1 FROM acordo_devedores ad2 JOIN devedores d2 ON d2.id = ad2.devedor_id
+               WHERE ad2.acordo_id = a.id
+                 AND (d2.nome ILIKE '%'||$1||'%' OR d2.cpf ILIKE '%'||REPLACE($1,'.','.')||'%'))
+       OR EXISTS (SELECT 1 FROM acordo_alunos aa2 JOIN alunos al2 ON al2.id = aa2.aluno_id
+                  WHERE aa2.acordo_id = a.id AND al2.nome ILIKE '%'||$1||'%')
+     )
+     AND ($2::text IS NULL OR acs.status = $2::text)`,
     [busca, status]
   );
-  return res.status(200).json({ acordos: rows });
+
+  return res.status(200).json({
+    acordos: rows,
+    total: cnt[0].total,
+    pagina,
+    limite,
+    paginas: Math.max(1, Math.ceil(cnt[0].total / limite)),
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -499,12 +530,40 @@ async function processarCredoras(db, lista) {
   return out;
 }
 
+// Reaproveita o aluno já cadastrado em vez de inserir sempre. Antes, cada
+// salvamento criava linhas novas: reabrir e salvar o mesmo acordo duplicava os
+// alunos, e um irmão em dois acordos virava dois cadastros.
+//
+// Chave: o RA quando existe (é o identificador do colégio, sem ambiguidade).
+// Sem RA, cai para nome + série, que é o que a secretaria tem em mãos. Dois
+// alunos homônimos na mesma série passariam a compartilhar cadastro — o custo
+// disso é a listagem de beneficiários, não valor nenhum, e é bem menos provável
+// que a duplicação garantida de antes.
 async function processarAlunos(db, lista) {
   const out = [];
   for (const al of lista) {
+    const nome = (al.nome || '').trim();
+    const ra   = (al.ra   || '').trim();
+    if (!nome) throw Object.assign(new Error('Nome do aluno é obrigatório'), { status: 400 });
+
+    const { rows: ex } = ra
+      ? await db.query('SELECT id FROM alunos WHERE ra = $1', [ra])
+      : await db.query(
+          `SELECT id FROM alunos
+           WHERE LOWER(nome) = LOWER($1) AND COALESCE(serie,'') = COALESCE($2,'') AND ra IS NULL`,
+          [nome, al.serie || null]);
+
+    if (ex.length > 0) {
+      // Série e turno mudam a cada ano letivo; o cadastro acompanha
+      await db.query('UPDATE alunos SET serie = $1, turno = $2 WHERE id = $3',
+        [al.serie || null, al.turno || null, ex[0].id]);
+      out.push(ex[0].id);
+      continue;
+    }
+
     const { rows: novo } = await db.query(
       'INSERT INTO alunos (nome,serie,turno,ra) VALUES ($1,$2,$3,$4) RETURNING id',
-      [al.nome,al.serie||null,al.turno||null,al.ra||null]
+      [nome, al.serie || null, al.turno || null, ra || null]
     );
     out.push(novo[0].id);
   }
