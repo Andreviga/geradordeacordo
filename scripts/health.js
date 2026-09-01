@@ -164,6 +164,35 @@ async function checkDrive() {
     }
   }
 
+  // A pasta de backup nunca era verificada aqui, só a de PDFs. Como as duas são
+  // independentes, o health dava verde com a de backup inacessível — e o backup
+  // semanal falhava sem que nada acusasse.
+  const backupId = process.env.DRIVE_BACKUP_FOLDER_ID;
+  if (!backupId) {
+    FAIL('DRIVE_BACKUP_FOLDER_ID não configurado — o backup semanal falha a cada execução',
+      'Crie a pasta no Drive Compartilhado, compartilhe com a SA e copie o ID da URL');
+    return false;
+  }
+  try {
+    const r = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(backupId)}?fields=id,name&supportsAllDrives=true`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    const corpo = await r.text();
+    if (!r.ok) {
+      if (/has not been used in project|is disabled/i.test(corpo))
+        throw new Error('a Google Drive API está desativada no projeto GCP');
+      if (r.status === 404)
+        throw new Error('pasta não encontrada — compartilhe com a service account');
+      throw new Error(`HTTP ${r.status}`);
+    }
+    OK(`Pasta de backup acessível: "${JSON.parse(corpo).name}"`);
+  } catch (err) {
+    FAIL(`Pasta de backup inacessível: ${err.message}`,
+      'Sem ela o backup semanal falha toda segunda, e só aparece no log do Vercel');
+    return false;
+  }
+
   return true;
 }
 
