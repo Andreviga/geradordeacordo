@@ -2893,6 +2893,41 @@ window.addEventListener('resize',()=>{
 });
 ajustarTopo();
 if(window.innerWidth<=900) switchTab(sessionStorage.getItem('activeTab')||'form');
+
+// ── Prefill vindo do Painel Raízes ─────────────────────────────────────────
+// O painel abre /?prefill=<base64url(json)> com devedor (responsável
+// financeiro), alunos e as cobranças selecionadas como itens do demonstrativo.
+(function detectarPrefill(){
+  const b64=new URLSearchParams(location.search).get('prefill');
+  if(!b64) return;
+  try{
+    const json=new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0)));
+    const p=JSON.parse(json);
+    if(p.dev&&p.dev.nome){
+      devedores.length=0;
+      devedores.push({nome:p.dev.nome||'',nac:'brasileiro(a)',civil:'',prof:'',rg:'',rgEmissor:'',cpf:p.dev.cpf||'',cep:p.dev.cep||'',end:p.dev.end||'',cid:p.dev.cid||'',contato:p.dev.contato||''});
+    }
+    if(Array.isArray(p.alunos)&&p.alunos.length){
+      alunos.length=0;
+      p.alunos.forEach(a=>alunos.push({nome:a.nome||'',serie:a.serie||'',turno:a.turno||'',ra:a.ra||''}));
+    }
+    if(Array.isArray(p.itens)&&p.itens.length){
+      itens.length=0;
+      p.itens.forEach(i=>itens.push({desc:i.desc||'',venc:i.venc||'',valor:i.valor||''}));
+      const totalCts=itens.reduce((s,i)=>s+strToCents(i.valor),0);
+      $('d_original').value=(totalCts/100).toFixed(2);
+      if(p.encargos!=null) $('d_encargos').value=Number(p.encargos).toFixed(2);
+      const encCts=inputCents('d_encargos'), descCts=inputCents('d_desconto');
+      $('d_total').value=((totalCts+encCts-descCts)/100).toFixed(2);
+      const chk=$('op_demonstrativo'); if(chk) chk.checked=true;
+    }
+    if(p.origem&&$('d_origem')) $('d_origem').value=p.origem;
+    if(p.periodo&&$('d_periodo')) $('d_periodo').value=p.periodo;
+    drawLists(); render();
+    history.replaceState(null,'','/'); // tira o payload da URL
+    toast('Dados recebidos do Painel Raízes — confira e gere o termo. 🌱');
+  }catch(e){ console.warn('prefill inválido', e); }
+})();
 </script>
 
 <!-- Barra de ações fixada no rodapé (mobile) -->
