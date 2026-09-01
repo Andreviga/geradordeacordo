@@ -405,27 +405,54 @@ usuário pode ser criado depois pela interface.
 
 ---
 
-## Primeiro usuário (cadastro manual)
+## Gestão de usuários
 
-Enquanto não houver tela de gerenciamento, o primeiro usuário é criado via `psql`.
-**Crie como `admin`** — sem um admin, nenhum outro usuário pode ser criado depois.
+O primeiro admin nasce pela linha de comando (`npm run db:criar-admin`). Do segundo
+em diante, tudo acontece na tela: botão **Usuários** na barra superior, visível só
+para quem é admin.
 
-```sql
--- Gere o hash da senha com: npm run hash
-INSERT INTO usuarios (nome, email, hash_senha, papel)
-VALUES (
-  'Nome da Secretaria',
-  'email-real@dominio.com.br',  -- campo UNIQUE; é o login
-  '$2a$10$...',                  -- hash gerado por npm run hash
-  'admin'
-);
-```
+| Ação | Onde |
+|---|---|
+| Criar usuário (nome, e-mail, papel, senha provisória) | tela **Usuários** |
+| Promover a admin / rebaixar a secretaria | tela **Usuários** |
+| Desativar e reativar | tela **Usuários** |
+| Definir nova senha para alguém | tela **Usuários** |
+| Trocar a própria senha esquecida | tela de login → *Esqueci minha senha* |
 
-> O campo `email` é `UNIQUE`. Use o e-mail real da pessoa que vai administrar o sistema,
+Papéis (o banco só aceita estes dois):
+
+- **`secretaria`** — usa o sistema no dia a dia: cria acordos, dá baixa, consulta.
+- **`admin`** — tudo isso, mais gerenciar usuários e cancelar acordos.
+
+### Desativar em vez de excluir
+
+Não existe exclusão de usuário, de propósito: `acordos.criado_por` referencia
+`usuarios(id)`, e apagar a linha destruiria a autoria dos acordos já emitidos.
+Desativar resolve o que importa — o acesso é cortado **na hora**, mesmo se a pessoa
+estiver com uma sessão aberta, porque o `ativo` é reconferido no banco a cada
+requisição. Toda desativação fica registrada em `auditoria_exclusoes`.
+
+### Travas contra ficar sem administrador
+
+O sistema recusa, com `409`, qualquer operação que deixasse ninguém no comando:
+
+- desativar a própria conta;
+- rebaixar a própria conta;
+- desativar ou rebaixar o **último admin ativo**, mesmo sendo outra pessoa fazendo.
+
+Sem isso, um clique distraído exigiria acesso por linha de comando para consertar.
+A tela também esconde os botões correspondentes, mas a decisão é sempre do servidor:
+o papel é relido do banco a cada requisição, então esconder botão é conveniência,
+nunca a proteção.
+
+> O campo `email` é `UNIQUE` e é o login. Use o e-mail real da pessoa,
 > não o e-mail de notificações (`notificacoesraizes@gmail.com`).
+
+### Retenção de dados (pendente)
+
 - Defina prazo de retenção antes de colocar em produção (sugestão: 5 anos após quitação
   ou conforme orientação jurídica e PROCON).
-- A Fase E implementará exclusão automática via rotina agendada.
+- A exclusão automática por rotina agendada ainda **não** foi implementada.
 
 ### Política de retry da ZapSign
 

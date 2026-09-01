@@ -184,7 +184,7 @@ grupo('[6b] Todos os ramos do catch-all parcelas exigem JWT (sem auth → 401)')
 // ── [6c] GET /api/vencidas sem JWT → 401 ──────────────────────────────────────
 grupo('[6c] GET /api/vencidas sem JWT → 401');
 {
-  const handler = require('../api/vencidas.js');
+  const handler = require('../api/painel.js');
   const origSecret = process.env.JWT_SECRET;
   process.env.JWT_SECRET = SECRET;
   const req = mockReq({ method: 'GET', headers: {}, query: {} });
@@ -198,7 +198,7 @@ grupo('[6c] GET /api/vencidas sem JWT → 401');
 // ── [6d] GET /api/dashboard sem JWT → 401 ─────────────────────────────────────
 grupo('[6d] GET /api/dashboard sem JWT → 401');
 {
-  const handler = require('../api/dashboard.js');
+  const handler = require('../api/painel.js');
   const origSecret = process.env.JWT_SECRET;
   process.env.JWT_SECRET = SECRET;
   const req = mockReq({ method: 'GET', headers: {}, query: {} });

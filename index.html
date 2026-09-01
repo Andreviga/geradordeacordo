@@ -308,6 +308,7 @@ input[type=range]{width:100%;accent-color:var(--seal)}
     <button class="btn ghost small" id="btnDashboard" onclick="abrirDashboard()" style="display:none">Dashboard</button>
     <button class="btn ghost small" id="btnVencidas" onclick="abrirVencidas()" style="display:none">Vencidas</button>
     <button class="btn ghost small" id="btnImportar" onclick="abrirImportar()" style="display:none" title="Cadastrar acordo já existente em papel">Importar acordo</button>
+    <button class="btn ghost small" id="btnUsuarios" onclick="abrirUsuarios()" style="display:none" title="Gerenciar quem tem acesso ao sistema">Usuários</button>
   </div>
   <div class="topbar-export" style="display:flex;gap:6px;align-items:center">
     <button class="btn" onclick="exportWord()">Baixar Word</button>
@@ -688,6 +689,21 @@ function jwtExpirado(t){
     return p.exp*1000<Date.now();
   }catch{ return true; }
 }
+// Papel do usuário logado, lido do JWT. Serve só para esconder botão: quem manda
+// é o servidor, que relê o papel no banco a cada requisição.
+function papelAtual(){
+  try{
+    const t=getJWT();
+    return JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).papel||'';
+  }catch{ return ''; }
+}
+function mostrarBotoesNav(){
+  $('btnVerAcordos').style.display='';
+  $('btnDashboard').style.display='';
+  $('btnVencidas').style.display='';
+  $('btnImportar').style.display='';
+  $('btnUsuarios').style.display = papelAtual()==='admin' ? '' : 'none';
+}
 // Helper: monta headers para chamadas s rotas /api/
 const apiHeaders=()=>{
   const h={'Content-Type':'application/json'};
@@ -712,10 +728,7 @@ async function fazerLogin(e){
     $('loginSenha').value='';
     toast('Acesso autorizado.');
     verificarAssinatura();
-    $('btnVerAcordos').style.display='';
-    $('btnDashboard').style.display='';
-    $('btnVencidas').style.display='';
-    $('btnImportar').style.display='';
+    mostrarBotoesNav();
     _gerarChaveIdempotencia(); // nova sessão de formulário ao fazer login
   }catch(err){
     erro.textContent=err.message;
@@ -771,10 +784,7 @@ async function confirmarReset(e){
     $('loginModal').style.display='none';
     toast('Senha atualizada! Bem-vindo(a), '+d.nome+'.');
     verificarAssinatura();
-    $('btnVerAcordos').style.display='';
-    $('btnDashboard').style.display='';
-    $('btnVencidas').style.display='';
-    $('btnImportar').style.display='';
+    mostrarBotoesNav();
     _gerarChaveIdempotencia();
   }catch(err){
     erroDiv.textContent=err.message; erroDiv.style.display='';
@@ -797,10 +807,7 @@ function verificarAutenticacao(){  const jwt=getJWT();
   }
   $('loginModal').style.display='none';
   // Garante que os botões de nav ficam visíveis após reload com sessão ativa
-  $('btnVerAcordos').style.display='';
-  $('btnDashboard').style.display='';
-  $('btnVencidas').style.display='';
-  $('btnImportar').style.display='';
+  mostrarBotoesNav();
   return true;
 }
 // Converte string de valor para centavos inteiros.
@@ -2234,7 +2241,7 @@ async function abrirDashboard(){
   const cards=$('dashCards');
   cards.innerHTML='<p style="color:var(--ink-2);grid-column:1/-1">Carregando…</p>';
   try{
-    const r=await fetch('/api/dashboard',{headers:apiHeaders()});
+    const r=await fetch('/api/painel?tipo=dashboard',{headers:apiHeaders()});
     if(!r.ok) throw new Error((await r.json()).erro||`Erro ${r.status}`);
     const d=await r.json();
     const card=(label,val,cor)=>`<div style="background:${cor}10;border:1px solid ${cor}40;border-radius:8px;padding:18px;text-align:center">
@@ -2281,7 +2288,7 @@ async function carregarVencidas(){
   const min=encodeURIComponent($('vencMinDias')?.value||1);
   const max=encodeURIComponent($('vencMaxDias')?.value||9999);
   try{
-    const r=await fetch(`/api/vencidas?minDias=${min}&maxDias=${max}`,{headers:apiHeaders()});
+    const r=await fetch(`/api/painel?tipo=vencidas&minDias=${min}&maxDias=${max}`,{headers:apiHeaders()});
     if(!r.ok) throw new Error((await r.json()).erro||`Erro ${r.status}`);
     const {vencidas}=await r.json();
     if(!vencidas.length){t.innerHTML='<p style="color:var(--ink-2);padding:16px">Nenhuma parcela vencida neste intervalo.</p>';return;}
@@ -2495,6 +2502,152 @@ async function confirmarEstorno(parcelaId){
   }
 }
 /* ── Importação retroativa ── */
+// ── Gestão de usuários (somente admin) ──────────────────────────────────────
+// O botão só aparece para admin, mas quem decide é o servidor: todo endpoint
+// aqui responde 403 se o papel no banco não for admin.
+let _usuarios=[];   // última lista carregada, para não passar nome pelo onclick
+async function apiUsuarios(metodo, query, corpo){
+  const qs = query ? '?' + new URLSearchParams(query) : '';
+  const r = await fetch('/api/usuarios'+qs, {
+    method: metodo,
+    headers: apiHeaders(),
+    body: corpo ? JSON.stringify(corpo) : undefined,
+  });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.erro || `Erro ${r.status}`);
+  return d;
+}
+
+async function abrirUsuarios(){
+  let o=$('usuOverlay');
+  if(!o){
+    o=document.createElement('div');
+    o.id='usuOverlay';
+    o.className='login-overlay';
+    o.style.display='none';
+    o.innerHTML=`<div style="background:var(--surface);border-radius:8px;width:min(880px,96vw);max-height:92vh;overflow:auto;padding:28px;box-shadow:0 12px 48px rgba(0,0,0,.4)">
+      <div style="display:flex;align-items:center;margin-bottom:6px">
+        <h2 style="margin:0;flex:1">Usuários</h2>
+        <button class="btn ghost small" onclick="$('usuOverlay').style.display='none'">✕ Fechar</button>
+      </div>
+      <p class="hint" style="margin:0 0 18px">Quem pode entrar no sistema. Desativar corta o acesso na hora, mesmo com sessão aberta.</p>
+      <div id="usuErro" class="login-erro" style="display:none"></div>
+      <div id="usuLista"></div>
+      <details class="group" style="margin-top:20px">
+        <summary><span>Novo usuário</span></summary>
+        <div class="body">
+          <div class="row r2">
+            <div><label>Nome</label><input type="text" id="usuNome" placeholder="Maria da Silva"></div>
+            <div><label>E-mail</label><input type="email" id="usuEmail" placeholder="maria@raizesedu.com.br"></div>
+          </div>
+          <div class="row r2">
+            <div><label>Papel</label><select id="usuPapel">
+              <option value="secretaria">Secretaria — usa o sistema no dia a dia</option>
+              <option value="admin">Admin — também gerencia usuários e cancela acordos</option>
+            </select></div>
+            <div><label>Senha provisória (mín. 8)</label><input type="password" id="usuSenha" autocomplete="new-password"></div>
+          </div>
+          <button class="btn primary" onclick="criarUsuario()">Criar usuário</button>
+        </div>
+      </details>
+    </div>`;
+    document.body.appendChild(o);
+  }
+  o.style.display='flex';
+  await carregarUsuarios();
+}
+
+function usuErro(msg){
+  const e=$('usuErro');
+  if(!e) return;
+  if(!msg){ e.style.display='none'; return; }
+  e.textContent=msg; e.style.display='';
+}
+
+async function carregarUsuarios(){
+  const box=$('usuLista');
+  box.innerHTML='<p class="hint">Carregando…</p>';
+  usuErro('');
+  try{
+    const d=await apiUsuarios('GET');
+    _usuarios=d.usuarios;
+    const eu=(()=>{ try{ return JSON.parse(atob(getJWT().split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).sub; }catch{ return ''; } })();
+    const admins=d.usuarios.filter(u=>u.papel==='admin'&&u.ativo).length;
+    box.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="text-align:left;border-bottom:2px solid var(--line)">
+        <th style="padding:8px 6px">Nome</th><th>E-mail</th><th>Papel</th><th>Último acesso</th><th style="text-align:right">Ações</th>
+      </tr></thead><tbody>${d.usuarios.map(u=>linhaUsuario(u,eu,admins)).join('')}</tbody></table>`;
+  }catch(err){
+    box.innerHTML='';
+    usuErro(err.message);
+  }
+}
+
+function linhaUsuario(u,eu,admins){
+  const souEu = u.id===eu;
+  // Espelha as travas do servidor para não oferecer botão que vai dar 409
+  const ultimoAdmin = u.papel==='admin' && u.ativo && admins<=1;
+  const data = u.ultimo_acesso ? new Date(u.ultimo_acesso).toLocaleDateString('pt-BR') : '—';
+  const cor  = u.ativo ? 'var(--ink)' : 'var(--ink-2)';
+  const btn=(rot,fn,tit)=>`<button class="btn mini" onclick="${fn}" title="${esc(tit||'')}">${rot}</button>`;
+  const acoes=[];
+  // Só o id vai para o onclick — o nome é buscado em _usuarios na hora do clique.
+  // Interpolar o nome aqui quebraria com apóstrofo (D'Ávila): esc() vira &#39;,
+  // que o navegador decodifica de volta para ' antes de interpretar o atributo.
+  if(!souEu && !ultimoAdmin && u.ativo)
+    acoes.push(btn(u.papel==='admin'?'Rebaixar':'Promover',
+      `alterarUsuario('${u.id}',{papel:'${u.papel==='admin'?'secretaria':'admin'}'})`,
+      u.papel==='admin'?'Vira secretaria':'Vira admin'));
+  acoes.push(btn('Senha',`senhaUsuario('${u.id}')`,'Define uma nova senha'));
+  if(!souEu && !ultimoAdmin)
+    acoes.push(btn(u.ativo?'Desativar':'Reativar',`alterarUsuario('${u.id}',{ativo:${!u.ativo}})`,
+      u.ativo?'Corta o acesso agora':'Devolve o acesso'));
+  return `<tr style="border-bottom:1px solid var(--line);color:${cor}">
+    <td style="padding:8px 6px">${esc(u.nome)}${souEu?' <small style="color:var(--seal)">(você)</small>':''}</td>
+    <td>${esc(u.email)}</td>
+    <td>${u.papel==='admin'?'<b>admin</b>':'secretaria'}${u.ativo?'':' <small style="color:var(--alert)">inativo</small>'}</td>
+    <td>${data}</td>
+    <td style="text-align:right;white-space:nowrap">${acoes.join(' ')}</td>
+  </tr>`;
+}
+
+async function criarUsuario(){
+  usuErro('');
+  const nome=$('usuNome').value.trim(), email=$('usuEmail').value.trim();
+  const papel=$('usuPapel').value, senha=$('usuSenha').value;
+  if(!nome||!email||!senha) return usuErro('Preencha nome, e-mail e senha.');
+  if(senha.length<8)        return usuErro('A senha precisa de pelo menos 8 caracteres.');
+  try{
+    await apiUsuarios('POST',null,{nome,email,papel,senha});
+    $('usuNome').value=''; $('usuEmail').value=''; $('usuSenha').value='';
+    toast(`Usuário ${nome} criado.`);
+    await carregarUsuarios();
+  }catch(err){ usuErro(err.message); }
+}
+
+async function alterarUsuario(id,campos){
+  usuErro('');
+  if(campos.ativo===false && !confirm('Desativar este usuário? O acesso é cortado imediatamente.')) return;
+  try{
+    await apiUsuarios('PATCH',{id},campos);
+    toast('Usuário atualizado.');
+    await carregarUsuarios();
+  }catch(err){ usuErro(err.message); }
+}
+
+async function senhaUsuario(id){
+  usuErro('');
+  const nome=(_usuarios.find(u=>u.id===id)||{}).nome||'este usuário';
+  const senha=prompt(`Nova senha para ${nome} (mínimo 8 caracteres):`);
+  if(senha===null) return;
+  if(senha.length<8) return usuErro('A senha precisa de pelo menos 8 caracteres.');
+  try{
+    await apiUsuarios('POST',{id,acao:'senha'},{senha});
+    toast('Senha definida. Passe-a para a pessoa por um canal seguro.');
+  }catch(err){ usuErro(err.message); }
+}
+
+
 function abrirImportar(){
   let o=$('importarOverlay');
   if(!o){

@@ -12,7 +12,7 @@
     "@playwright/test": "^1.40.0"
   },
   "scripts": {
-    "test:unit": "node tests/plano.test.js && node tests/validar-tokens.test.js && node tests/subst.test.js && node tests/rotas-exportacao.test.js && node tests/campos-formulario.test.js && node tests/feriados.test.js && node tests/datas.test.js && node tests/credoras.test.js && node tests/ordinais.test.js && node tests/assinatura.test.js && node tests/limites.test.js && node tests/extenso.test.js && node tests/mascaras.test.js && node tests/qualdevedor.test.js && node tests/lembretes.test.js && node tests/acordos-auth.test.js && node tests/acordos-parcelas.test.js && node tests/rotas-vercel.test.js && node tests/restore.test.js && node tests/html-syntax.test.js",
+    "test:unit": "node tests/plano.test.js && node tests/validar-tokens.test.js && node tests/subst.test.js && node tests/rotas-exportacao.test.js && node tests/campos-formulario.test.js && node tests/feriados.test.js && node tests/datas.test.js && node tests/credoras.test.js && node tests/ordinais.test.js && node tests/assinatura.test.js && node tests/limites.test.js && node tests/extenso.test.js && node tests/mascaras.test.js && node tests/qualdevedor.test.js && node tests/lembretes.test.js && node tests/acordos-auth.test.js && node tests/acordos-parcelas.test.js && node tests/rotas-vercel.test.js && node tests/restore.test.js && node tests/usuarios.test.js && node tests/html-syntax.test.js",
     "test:e2e": "playwright test",
     "test": "npm run test:unit && npm run test:restore",
     "hash": "node scripts/gerar-hash.js",

@@ -15,8 +15,8 @@ const cancelarHandler = acordosHandler; // mesmo arquivo, roteado por params
 const importarHandler = acordosHandler; // idem
 const baixarHandler   = parcelasHandler;
 const estornarHandler = parcelasHandler;
-const venchidasHandler= require('../api/vencidas.js');
-const dashHandler     = require('../api/dashboard.js');
+const painelHandler   = require('../api/painel.js');
+
 
 const SECRET = process.env.JWT_SECRET || 'smoke-test-secret-xxxxxxxxxxxxxxxxx';
 process.env.JWT_SECRET = SECRET;
@@ -375,20 +375,20 @@ async function main() {
     assert('tratamento_manual = true', pr[0].tratamento_manual === true);
   }
 
-  grupo('[10f] GET /api/vencidas');
+  grupo('[10f] GET /api/painel?tipo=vencidas');
   {
-    const req = mockReq('GET', bearerHeader(adminId, 'admin'), null, { minDias: 1, maxDias: 9999 });
+    const req = mockReq('GET', bearerHeader(adminId, 'admin'), null, { tipo: 'vencidas', minDias: 1, maxDias: 9999 });
     const res = mockRes();
-    await venchidasHandler(req, res);
+    await painelHandler(req, res);
     assert('vencidas → 200', res._status === 200);
     assert('retorna array', Array.isArray(res._body?.vencidas));
   }
 
-  grupo('[10g] GET /api/dashboard');
+  grupo('[10g] GET /api/painel?tipo=dashboard');
   {
-    const req = mockReq('GET', bearerHeader(adminId, 'admin'), null, {});
+    const req = mockReq('GET', bearerHeader(adminId, 'admin'), null, { tipo: 'dashboard' });
     const res = mockRes();
-    await dashHandler(req, res);
+    await painelHandler(req, res);
     assert('dashboard → 200', res._status === 200);
     assert('tem campo ativos',       typeof res._body?.ativos    === 'number');
     assert('tem campo vencidas',     typeof res._body?.vencidas  === 'number');
