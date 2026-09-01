@@ -22,7 +22,9 @@
 
 const { getPool } = require('../_db');
 
-const JOBS = ['lembretes', 'backup'];
+// 'retencao' existe como endpoint mas NÃO está agendado no vercel.json: apaga
+// dado pessoal em definitivo, então só roda quando alguém pedir. Ver README.
+const JOBS = ['lembretes', 'backup', 'retencao'];
 
 /** Nome do job: vem do rewrite (?job=) ou, se ele falhar, da própria URL. */
 function jobDaRota(req) {
@@ -47,9 +49,9 @@ module.exports = async (req, res) => {
   if (!JOBS.includes(job))
     return res.status(404).json({ error: `Job desconhecido. Aceito: ${JOBS.join(', ')}` });
 
-  // O backup precisa do banco; os lembretes abrem a conexão por conta própria
+  // Backup e retenção precisam do banco; os lembretes abrem a conexão sozinhos
   let pool = null;
-  if (job === 'backup') {
+  if (job === 'backup' || job === 'retencao') {
     pool = getPool();
     if (!pool) return res.status(503).json({ error: 'DATABASE_URL não configurado' });
   }
@@ -59,9 +61,16 @@ module.exports = async (req, res) => {
     if (job === 'lembretes') {
       const { executarLembretes } = require('./_lembretes_engine');
       result = await executarLembretes({ dryRun: false });
-    } else {
+    } else if (job === 'backup') {
       const { executarBackup } = require('./_backup_engine');
       result = await executarBackup(pool);
+    } else {
+      // Expurgo é irreversível: por HTTP só roda em modo ensaio, a menos que a
+      // chamada peça explicitamente ?aplicar=1. Assim uma chamada acidental —
+      // ou um agendamento posto sem querer — não apaga nada.
+      const { executarRetencao } = require('./_retencao_engine');
+      const aplicar = String(req.query?.aplicar || '') === '1';
+      result = await executarRetencao(pool, { dryRun: !aplicar });
     }
     console.log(`[cron/${job}] concluído:`, result);
     return res.status(200).json(result);

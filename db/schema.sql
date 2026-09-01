@@ -436,3 +436,9 @@ BEGIN
 EXCEPTION WHEN unique_violation OR duplicate_table THEN
   RAISE NOTICE 'idx_alunos_ra não criado: já existem RAs duplicados em alunos. Limpe antes.';
 END $$;
+
+-- Retenção LGPD: marca quando os dados pessoais da linha foram apagados.
+-- A linha continua existindo porque acordos e parcelas dependem dela — o que
+-- some é o dado pessoal, não o registro financeiro. Ver api/cron/_retencao_engine.js.
+ALTER TABLE devedores ADD COLUMN IF NOT EXISTS anonimizado_em TIMESTAMPTZ;
+ALTER TABLE alunos    ADD COLUMN IF NOT EXISTS anonimizado_em TIMESTAMPTZ;
