@@ -1,25 +1,62 @@
 {
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/api/acordos/:seg1",       "destination": "/api/acordos?_seg1=:seg1"              },
-    { "source": "/api/acordos/:seg1/:seg2", "destination": "/api/acordos?_seg1=:seg1&_seg2=:seg2"  },
-    { "source": "/api/parcelas/:seg1",       "destination": "/api/parcelas?_seg1=:seg1"             },
-    { "source": "/api/parcelas/:seg1/:seg2", "destination": "/api/parcelas?_seg1=:seg1&_seg2=:seg2" }
+    {
+      "source": "/api/acordos/:seg1",
+      "destination": "/api/acordos?_seg1=:seg1"
+    },
+    {
+      "source": "/api/acordos/:seg1/:seg2",
+      "destination": "/api/acordos?_seg1=:seg1&_seg2=:seg2"
+    },
+    {
+      "source": "/api/parcelas/:seg1",
+      "destination": "/api/parcelas?_seg1=:seg1"
+    },
+    {
+      "source": "/api/parcelas/:seg1/:seg2",
+      "destination": "/api/parcelas?_seg1=:seg1&_seg2=:seg2"
+    },
+    {
+      "source": "/api/cron/:job",
+      "destination": "/api/cron?job=:job"
+    }
   ],
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options",  "value": "nosniff" },
-        { "key": "X-Frame-Options",         "value": "DENY" },
-        { "key": "Referrer-Policy",          "value": "strict-origin-when-cross-origin" },
-        { "key": "Permissions-Policy",       "value": "camera=(), microphone=(), geolocation=()" },
-        { "key": "Content-Security-Policy",   "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://viacep.com.br; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://viacep.com.br; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        }
       ]
     }
   ],
   "crons": [
-    { "path": "/api/cron/lembretes", "schedule": "0 12 * * 1-5" },
-    { "path": "/api/cron/backup",    "schedule": "0 6 * * 1"   }
+    {
+      "path": "/api/cron/lembretes",
+      "schedule": "0 12 * * 1-5"
+    },
+    {
+      "path": "/api/cron/backup",
+      "schedule": "0 6 * * 1"
+    }
   ]
 }
