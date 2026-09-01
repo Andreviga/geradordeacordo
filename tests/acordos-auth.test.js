@@ -224,7 +224,6 @@ grupo('[8] Estrutural: handlers /api/ chamam verificarRequisicao ou são whiteli
 {
   const WHITELIST = new Set([
     'api/login.js',
-    'api/assinatura/webhook.js',
     'api/_auth.js',
     'api/_db.js',
     'api/cron/_calcularEvento.js',

@@ -13,7 +13,7 @@ Sistema de geração e gestão de Termos de Confissão de Dívida com banco de d
 │   ├── cron/                   ← lembretes (D-3/D+1/D+7/D+15) e backup semanal
 │   ├── login.js, dashboard.js, vencidas.js, health.js
 │   ├── solicitar-reset.js, confirmar-reset.js
-│   └── assinatura/             ← integração ZapSign / Adobe Sign
+│   └── assinatura/             ← prepara o documento para assinatura no gov.br
 ├── db/schema.sql               ← schema PostgreSQL (idempotente)
 ├── scripts/                    ← scripts CLI de operação
 ├── tests/                      ← testes unitários (437 assertions)
@@ -240,114 +240,40 @@ o mesmo `.json` do computador.
 
 ---
 
-## 4. Configurar Assinatura Digital (Adobe Acrobat Sign)
+## 4. Assinatura digital — gov.br
 
-O endpoint de assinatura vive em `/api/adobe-sign` e precisa das seguintes variáveis de
-ambiente configuradas no painel do Vercel (**Settings → Environment Variables**):
+A assinatura é feita pelos próprios signatários no portal **gov.br**. O sistema não
+assina nem envia nada: ele valida o PDF, calcula o **SHA-256** de conferência e monta
+o passo a passo. Não há custo por assinatura e não há integração a manter.
 
-| Variável | Descrição | Onde obter |
-|---|---|---|
-| `ADOBE_SIGN_INTEGRATION_KEY` | Chave de integração da conta Adobe Sign | Adobe Sign → Conta → Adobe Sign API → Integration Key |
-| `ADOBE_SIGN_REGION` | Região da conta (padrão: `na4`) | `na1`/`na2`/`na4`/`eu1`/`eu2`/`au1`/`jp1`/`in1` |
-| `APP_ACCESS_TOKEN` | Segredo compartilhado cliente↔servidor | Gere com `openssl rand -hex 32` |
-| `ALLOWED_ORIGIN` | URL do Vercel sem barra final | ex.: `https://geradordeacordo.vercel.app` |
-| `ASSINATURA_PROVIDER` | Provedor ativo (padrão: `manual`) | `manual` ou `adobe` |
+Cada signatário precisa de conta gov.br **Prata ou Ouro** — Bronze não habilita
+assinatura eletrônica avançada.
 
-**Após configurar as variáveis no Vercel**, edite o `index.html` e defina a mesma string em:
+> ⚠️ **A assinatura é sequencial.** Cada signatário assina o arquivo **já assinado**
+> pelo anterior, nunca o original. Assinar o original em paralelo produz dois PDFs com
+> uma assinatura cada — sem validade como instrumento conjunto. As instruções que a
+> tela gera já dizem isso, em ordem.
 
-```js
-const APP_TOKEN = 'cole_aqui_o_mesmo_valor_de_APP_ACCESS_TOKEN';
-```
+Onde: `assinador.iti.gov.br` para assinar, `validar.iti.gov.br` para conferir.
 
-Para testar localmente, copie `.env.example` para `.env.local` (não commitado), preencha os
-valores e use `vercel dev`.
+O arquivo assinado fica com quem assinou — **o sistema não guarda cópia**. Cabe à
+secretaria arquivar a via final.
 
-### Segurança do endpoint
+Base legal do fecho eletrônico: art. 784, §4º do CPC (Lei nº 14.620/2023), que dispensa
+testemunhas quando a integridade é conferida por provedor de assinatura. O gov.br é um.
 
-O `/api/adobe-sign` usa duas camadas de proteção:
+### Integrações removidas
 
-1. **`APP_ACCESS_TOKEN`** — header `X-App-Token` exigido em toda requisição. É o controle de
-   acesso real; sem ele, qualquer `curl` externo recebe `401`. Quando a variável não está
-   configurada (ambiente de dev), o check é pulado.
+Houve integração com **ZapSign** e **Adobe Sign**, com webhook e guarda automática do
+PDF assinado no Drive. Foram removidas: a assinatura passou a ser exclusivamente pelo
+gov.br. Nenhuma delas chegou a gravar no banco, então não ficou dado órfão.
 
-2. **`ALLOWED_ORIGIN`** — verifica o header `Origin`/`Referer`. É camada adicional, *não*
-   única, pois headers são escolhidos pelo cliente e podem ser falsificados por scripts
-   não-browser.
-
-### Rate limit (best-effort)
-
-O endpoint limita a 10 requisições por minuto por IP. Este limite é **por instância** do
-servidor Vercel — em ambientes com múltiplas instâncias paralelas, o limite real é
-10 × número de instâncias ativas. O controle de acesso real é o `APP_ACCESS_TOKEN`; o
-rate limit é apenas amortecedor contra repetição acidental ou abuso básico. Para limite
-global garantido, seria necessário migrar o contador para um KV externo (ex.: Vercel KV).
+Se `ZAPSIGN_API_TOKEN`, `ZAPSIGN_WEBHOOK_SECRET`, `ZAPSIGN_VALIDATE_CPF`,
+`ASSINATURA_PROVIDER` ou as variáveis da Adobe ainda estiverem no painel do Vercel,
+**remova**. O `npm run health` acusa quando alguma sobra.
 
 ---
 
-## 5. Assinatura digital (ZapSign) e persistência de PDFs
-
-### Conta de serviço Google (Service Account)
-
-O webhook `/api/assinatura/webhook` recebe o evento `doc_signed` da ZapSign, baixa o PDF assinado
-do URL temporário (expira em 60 min) e sobe para o Google Drive usando uma **conta de serviço** —
-não a conta pessoal de ninguém.
-
-**Pré-requisitos:**
-
-1. Google Workspace (Drive Compartilhado). Arquivos criados por SA em "Meu Drive" pessoal ficam
-   sob cota da SA e podem ser bloqueados por políticas de Workspace. Use um **Drive Compartilhado**
-   da escola onde a SA tenha acesso de Contribuidor.
-2. No Google Cloud Console:
-   - Ative a **Google Drive API** no projeto.
-   - Crie uma Service Account (IAM → Service Accounts → Create).
-   - Gere e baixe a chave JSON (Manage keys → Add key → JSON).
-3. Compartilhe a pasta do Drive Compartilhado com o e-mail da SA
-   (`nome@projeto.iam.gserviceaccount.com`) — papel: **Contribuidor**.
-4. Copie o ID da pasta da URL do Drive: `https://drive.google.com/drive/folders/`**`ID`**.
-
-**Formato da variável `GOOGLE_SERVICE_ACCOUNT_JSON`:**
-
-O JSON da SA contém quebras de linha na `private_key`. Alguns painéis de variáveis
-(incluindo o da Vercel) interpretam incorretamente. Use **base64** para evitar o problema:
-
-```bash
-# macOS / Linux
-base64 -w0 service-account.json   # -w0 = sem quebra de linha
-
-# PowerShell (Windows)
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("service-account.json"))
-```
-
-Cole o resultado (uma linha só, sem espaços) em `GOOGLE_SERVICE_ACCOUNT_JSON`.
-O código aceita tanto JSON direto quanto base64 do JSON.
-
-**Variáveis de ambiente no Vercel (Settings → Environment Variables):**
-
-| Variável | Obrigatória para `doc_signed` | Descrição |
-|---|---|---|
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Sim | JSON da SA ou base64 do JSON |
-| `DRIVE_PDF_FOLDER_ID` | Sim | ID da pasta no Drive Compartilhado |
-| `ZAPSIGN_WEBHOOK_SECRET` | Sim | Segredo do webhook (painel ZapSign) |
-| `ZAPSIGN_API_TOKEN` | Sim (envio) | Token da API ZapSign |
-| `ZAPSIGN_VALIDATE_CPF` | Não | `true` para validar CPF na Receita; testar antes de ativar |
-
-> **Sem `GOOGLE_SERVICE_ACCOUNT_JSON` configurado:** o webhook responde `500` no evento
-> `doc_signed` e a ZapSign reenvia. Não há fallback silencioso.
-
-### LGPD — dados pessoais persistidos
-
-A pasta indicada em `DRIVE_PDF_FOLDER_ID` acumula documentos sensíveis:
-
-| Arquivo | Conteúdo | Base legal (LGPD) |
-|---|---|---|
-| `Assinado-{externalId}.pdf` | CPF, nome, endereço dos responsáveis e dados de menores | Art. 7º, V (execução de contrato) |
-| `_eventos_webhook.json` | Tokens ZapSign (sem PII) | Legítimo interesse (idempotência) |
-
-**Requisitos mínimos:**
-- Compartilhe a pasta **somente** com a conta de serviço e com as pessoas da secretaria.
-  Nunca use "Qualquer pessoa com o link".
-
----
 
 ## Banco de dados (Fase E)
 
@@ -503,40 +429,14 @@ automatizar, acrescente ao `vercel.json`:
 Sem `aplicar=1` o endpoint responde o ensaio e não altera nada — uma chamada
 acidental, ou um agendamento posto sem querer, não apaga nada.
 
-### Política de retry da ZapSign
-
-> ⚠️ **Não confirmado na documentação oficial.** O número abaixo (`MAX_RETRIES = 3`) é
-> baseado em comportamento comumente observado em provedores de webhook — não em documentação
-> explícita da ZapSign. Ajuste a constante em `webhook.js` após confirmar com o suporte
-> ou com os logs do painel ZapSign → Integrações → Webhooks → Histórico.
-
-Comportamento assumido (confirmar com ZapSign antes de ir para produção):
-- ~3 retentativas com backoff exponencial após falha ou timeout
-- Após esgotar: ZapSign para de tentar
-
-O webhook responde:
-- `500` em falhas de `doc_signed` (para acionar retentativa)
-- Após `MAX_RETRIES=3` falhas persistidas no Drive: responde `200` para parar o loop
-  e grava em `_pendencias.json` (visível via `action=pendencias`)
-- Logs: `[drive] 🔴 FALHA PERMANENTE` + ZapSign token para recuperação manual
-
-**Recuperação manual após falha permanente:** o token ZapSign aparece no log e em
-`_pendencias.json`. Com ele, acesse o painel ZapSign → Documentos → busca pelo token
-para baixar o PDF assinado manualmente.
-
-**Dependência circular:** se a falha for no Drive (e não na ZapSign), `marcarFalha`
-não consegue gravar. Nesse caso, o ZapSign token ainda aparece nos logs do Vercel como
-último recurso. Substitua por banco de dados na Fase E.
-
 ### Texto dos fechos — revisão jurídica obrigatória
 
 > ⚠️ **Os três textos abaixo são rascunhos funcionais e precisam de revisão pela
 > assessoria jurídica do colégio antes de entrar em produção.**
 
-Ponto específico a confirmar: a ZapSign entrega o relatório de auditoria **embutido** no
-PDF assinado ou como arquivo separado? Se vier separado, qualquer cláusula que afirme
-que o relatório "integra este instrumento" ou é "indissociável deste" cria contradição
-com o documento em si.
+Ponto específico a confirmar com a assessoria: o gov.br entrega o relatório de
+conferência embutido no PDF assinado. Qualquer cláusula que trate esse relatório como
+peça separada precisa ser relida à luz disso.
 
 Texto atualmente em uso no modo eletrônico:
 > "...cuja integridade é conferida pela plataforma de assinatura digital utilizada,

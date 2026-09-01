@@ -129,7 +129,9 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 
 #toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:var(--radius);font-size:13px;opacity:0;pointer-events:none;transition:.22s;z-index:99;max-width:90vw}
 #toast.on{opacity:1;transform:translate(-50%,0)}
-/* Âncoras de posicionamento ZapSign (texto branco sobre branco, invisível) */
+/* Âncoras de assinatura (texto branco sobre branco, invisível). Vestígio da
+   integração ZapSign, removida: hoje não têm efeito, e ficaram porque mexer no
+   corpo do documento exige nova revisão jurídica. */
 .sign-anchor{color:#fff;font-size:1pt;line-height:0;display:block;height:0;overflow:hidden}
 @media print{.sign-anchor{color:#fff}}
 
@@ -499,12 +501,8 @@ input[type=range]{width:100%;accent-color:var(--seal)}
           <input type="text" id="ass_msg" value="Você recebeu um convite para assinar eletronicamente um documento do Colégio Raízes. Clique em Assinar documento para conferir o conteúdo e concluir a assinatura com o código enviado ao seu e-mail. Prazo: 15 dias."></div>
       </div>
       <div class="check">
-        <input type="checkbox" id="op_whatsapp">
-        <span>Enviar link por WhatsApp (ZapSign) <small style="display:block">Custo: R$ 0,50 por signatário. Padrão desligado — envie o link manualmente pelo WhatsApp de graça.</small></span>
-      </div>
-      <div class="check">
         <input type="checkbox" id="op_credora_assina" onchange="atualizarSignatarios()">
-        <span>Credora assina eletronicamente <small style="display:block">Quando marcado, o representante da credora recebe link de assinatura via ZapSign. Desmarque para assinatura física do colégio.</small></span>
+        <span>Credora assina eletronicamente <small style="display:block">Quando marcado, o representante da credora também assina pelo gov.br. Desmarque para assinatura física do colégio.</small></span>
       </div>
       <div class="row">
         <div>
@@ -950,7 +948,7 @@ const CAMPOS_FORMULARIO=new Set([
   'f_foro','f_vias','f_local','f_data','op_datavazia','t1_nome','t1_cpf','t2_nome','t2_cpf','f_titulo',
   // Seção 10 — Google Drive removida (fluxo OAuth substituído por SA no servidor)
   // Seção 11 — Assinatura
-  'ass_msg','op_whatsapp','op_credora_assina','op_assinatura_eletronica'
+  'ass_msg','op_credora_assina','op_assinatura_eletronica'
 ]);
 
 /* ---------- listas dinâmicas ---------- */
@@ -1854,7 +1852,8 @@ function aplicarDados(d){
 
 // Seção 10 (Google Drive OAuth) removida: o fluxo OAuth do cliente foi substituído
 // pela service account no servidor (api/assinatura/_drive.js).
-// PDFs assinados são guardados automaticamente via webhook ZapSign.
+// A assinatura acontece no portal gov.br, feita por cada signatário; o arquivo
+// assinado fica com quem assinou. Não há webhook nem guarda automática.
 
 function saveJson(){
   baixar(new Blob([JSON.stringify(coletarDados(),null,2)],{type:'application/json'}),nomeArquivo('json'));
@@ -1974,8 +1973,8 @@ async function verificarAssinatura(){
     if(r.status===401){ verificarAutenticacao(); return; }
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d=await r.json();
-    const prov={zapsign:'ZapSign',adobe:'Adobe Sign',manual:'Gov.br (manual)'}[d.provedor]||d.provedor||'manual';
-    st.innerHTML='✓ Assinatura via <b>'+esc(prov)+'</b> configurada.';
+    const prov='gov.br';
+    st.innerHTML='✓ Assinatura pelo <b>gov.br</b>. O sistema prepara o documento e o passo a passo; quem assina é cada signatário, no portal.';
     st.className='status ok';
     if(btn) btn.disabled=false;
   }catch(e){
@@ -2027,14 +2026,13 @@ async function enviarAssinatura(){
         nomeDocumento:val('f_titulo')||'Termo de Confissão de Dívida',
         mensagem:val('ass_msg'),
         externalId:'acordo-'+Date.now().toString(36).toUpperCase(),
-        enviarWhatsapp:chk('op_whatsapp'),
         credoraNome:(credoras[0]||{}).nome||''})});
     const d=await r.json();
     if(r.status===401){ verificarAutenticacao(); return; }
     if(!r.ok&&!d.id) throw new Error(d.error||'Falha ('+r.status+')');
     st.className='status ok';
-    if(!d.url||!d.url.length){
-      st.innerHTML='<b>✓ Pronto para assinatura manual (gov.br).</b>';
+    {
+      st.innerHTML='<b>✓ Pronto para assinatura no gov.br.</b>';
       let html='<div class="calc">'+(d.aviso?'<div style="color:#6b4c00;margin-bottom:8px">⚠ '+esc(d.aviso)+'</div>':'')
         +'<b>SHA-256:</b> <code style="font-size:11px;word-break:break-all">'+esc(d.sha256||'')+'</code> '
         +'<button onclick="copiar(\''+(d.sha256||'')+'\')" class="btn mini">Copiar</button><br><br>'
@@ -2044,28 +2042,16 @@ async function enviarAssinatura(){
       });
       html+='</ol></div>';
       res.innerHTML=html;
-    }else{
-      const prov={zapsign:'ZapSign',adobe:'Adobe Sign'}[d.provedor]||d.provedor;
-      st.innerHTML='<b>✓ Enviado via '+esc(prov)+'!</b> ID: <code>'+esc(d.id)+'</code>';
-      let html='<div class="calc"><b>Links de assinatura</b> (válidos 15 dias):<br><br>';
-      (d.url||[]).forEach(s=>{
-        html+='<div style="margin-bottom:8px"><b>'+esc(s.nome||s.email)+'</b> &mdash; '+esc(s.email)+'<br>'
-          +'<a href="'+esc(s.url)+'" target="_blank" rel="noopener" class="btn mini">Abrir</a> '
-          +'<button onclick="copiar(\'' +esc(s.url)+'\')" class="btn mini">Copiar link</button>'
-          +'<small style="display:block;color:var(--ink-2);margin-top:2px">Cole no WhatsApp para assinar gratuitamente.</small></div>';
-      });
-      if(d.aviso) html+='<div style="color:#6b4c00;margin-top:8px">⚠ '+esc(d.aviso)+'</div>';
-      html+='</div>';
-      res.innerHTML=html;
     }
     res.style.display='';
-    toast('Documento enviado para assinatura!');
+    toast('Documento pronto para assinar no gov.br.');
   }catch(e){
     st.innerHTML='<span style="color:var(--alert)">Erro: '+esc(e.message)+'</span>';
     st.className='status erro';
     toast('Erro: '+e.message);
   }finally{ btn.disabled=false; }
 }
+// Nome antigo mantido porque ainda pode haver botão apontando para ele.
 async function enviarAdobeSign(){ return enviarAssinatura(); }
 
 $('f_data').value=new Date().toISOString().slice(0,10);

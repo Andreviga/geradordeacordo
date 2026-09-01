@@ -1,7 +1,7 @@
-// tests/assinatura.test.js — testes da Fase B
+// tests/assinatura.test.js — assinatura via gov.br e fecho do documento
 //
 // Todos usam mocks — nenhuma chamada real de rede.
-// Testes [17] e [18] precisam de DATABASE_URL para criar usuário de teste
+// O teste [17] precisa de DATABASE_URL para criar usuário de teste
 // (verificarRequisicaoComBanco consulta o banco em todos os endpoints autenticados).
 // Execute com: node tests/assinatura.test.js
 
@@ -10,10 +10,7 @@
 const path   = require('path');
 const crypto = require('crypto');
 const { validarSignatarios, validarPDF } = require('../api/assinatura/_contrato');
-const { normalizarResposta, traduzirErroZapSign, consultarPorExternalId, construirPayload } = require('../api/assinatura/_providers/zapsign');
 const manual = require('../api/assinatura/_providers/manual');
-const webhookHandler = require('../api/assinatura/webhook');
-const { processarDocSigned, processarEventoNaoCritico, eventosProcessados } = webhookHandler;
 const html = require('fs').readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 
 let passou = 0, falhou = 0;
@@ -25,7 +22,7 @@ function grupo(t) { console.log('\n' + t); }
 
 async function main() {
 
-// ── Setup: usuário de teste para [17] e [18] (requer DATABASE_URL) ────────────
+// ── Setup: usuário de teste para [17] (requer DATABASE_URL) ─────────────────
 let testJwt = null;
 let testUserId = null;
 const testEmail = `asm_test_${crypto.randomUUID().slice(0,8)}@test.local`;
@@ -53,139 +50,6 @@ const testEmail = `asm_test_${crypto.randomUUID().slice(0,8)}@test.local`;
     }
   }
 }
-grupo('[1] Dois signat\u00e1rios \u2192 dois sign_url distintos');
-{
-  const r = normalizarResposta({
-    token: 'doc-abc', status: 'pending',
-    signers: [
-      { name: 'Jo\u00e3o',  email: 'joao@x.com', sign_url: 'https://app.zapsign.com.br/verificar/aaa', token: 'tok1', status: 'pending', signed_at: null },
-      { name: 'Maria', email: 'maria@x.com', sign_url: 'https://app.zapsign.com.br/verificar/bbb', token: 'tok2', status: 'pending', signed_at: null },
-    ],
-  });
-  assert('id = token do documento',   r.id === 'doc-abc');
-  assert('provedor = zapsign',        r.provedor === 'zapsign');
-  assert('dois sign_url retornados',  r.url.length === 2);
-  assert('sign_url tem /verificar/',  r.url[0].url.includes('/verificar/'));
-  assert('sign_url distintos',        r.url[0].url !== r.url[1].url);
-}
-
-// ── [2] ──────────────────────────────────────────────────────────────────
-grupo('[2] Signat\u00e1rio sem e-mail \u2192 bloqueio antes da API');
-{
-  const err = validarSignatarios([{ nome: 'Jo\u00e3o', email: '' }]);
-  assert('retorna string de erro', typeof err === 'string');
-  assert('menciona e-mail',        err.toLowerCase().includes('e-mail'));
-}
-
-// ── [3] ──────────────────────────────────────────────────────────────────
-grupo('[3] E-mail inv\u00e1lido \u2192 bloqueio');
-{
-  const err = validarSignatarios([{ nome: 'Jo\u00e3o', email: 'nao-e-email' }]);
-  assert('retorna erro',    typeof err === 'string');
-  assert('menciona formato', err.toLowerCase().includes('formato'));
-}
-
-// ── [4] ──────────────────────────────────────────────────────────────────
-grupo('[4] E-mails duplicados \u2192 bloqueio');
-{
-  const err = validarSignatarios([
-    { nome: 'Jo\u00e3o',  email: 'mesmo@x.com' },
-    { nome: 'Maria', email: 'MESMO@X.COM' },
-  ]);
-  assert('retorna erro',     typeof err === 'string');
-  assert('menciona duplicado', err.toLowerCase().includes('duplicado'));
-}
-
-// ── [5] ──────────────────────────────────────────────────────────────────
-grupo('[5] PDF > 10 MB \u2192 mensagem espec\u00edfica');
-{
-  const largePDF = '%PDF-' + 'x'.repeat(10 * 1024 * 1024 + 1);
-  const { error, buffer } = validarPDF(Buffer.from(largePDF).toString('base64'));
-  assert('erro menciona 10 MB', typeof error === 'string' && error.includes('10 MB'));
-  assert('buffer \u00e9 null',        buffer === null);
-}
-
-// ── [6] ──────────────────────────────────────────────────────────────────
-grupo('[6] Token API inv\u00e1lido \u2192 PT-BR, sem vazar corpo bruto');
-{
-  const err = traduzirErroZapSign(401, { detail: 'Authentication credentials were not provided.' });
-  assert('menciona ZAPSIGN_API_TOKEN', err.error.includes('ZAPSIGN_API_TOKEN'));
-  assert('n\u00e3o vaza mensagem inglesa',  !err.error.includes('Authentication credentials'));
-  assert('code = INVALID_TOKEN',      err.code === 'INVALID_TOKEN');
-}
-
-// ── [7] ──────────────────────────────────────────────────────────────────
-grupo('[7] external_id existente \u2192 retorna doc existente, n\u00e3o cria novo');
-{
-  const orig = global.fetch;
-  let chamadas = 0;
-  global.fetch = async (url) => {
-    chamadas++;
-    if (url.includes('external_id=')) {
-      return { ok: true, json: async () => [{ token: 'doc-existente', status: 'pending', signers: [] }] };
-    }
-    return { ok: true, json: async () => ({ token: 'doc-novo', status: 'pending', signers: [] }) };
-  };
-  const resultado = await consultarPorExternalId('acordo-123', 'fake-token');
-  global.fetch = orig;
-  assert('retorna doc existente', resultado && resultado.id === 'doc-existente');
-  assert('apenas 1 chamada GET', chamadas === 1);
-}
-
-// ── [8] ──────────────────────────────────────────────────────────────────
-grupo('[8] doc_signed sem SA → lança erro (fail-loud); evento não-crítico 2x → in-memory fallback');
-{
-  delete process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-
-  // doc_signed sem SA configurado deve lançar erro (não silenciar)
-  let errMsg = '';
-  try {
-    await processarDocSigned({ event_type: 'doc_signed', document: { token: 'doc-xyz', signed_file: null } });
-  } catch (e) { errMsg = e.message; }
-  assert('doc_signed sem SA → lança erro', errMsg.length > 0);
-  assert('mensagem menciona GOOGLE_SERVICE_ACCOUNT_JSON', errMsg.includes('GOOGLE_SERVICE_ACCOUNT_JSON'));
-
-  // Evento não-crítico usa in-memory Set como fallback
-  eventosProcessados.clear();
-  const p = { event_type: 'doc_refused', document: { token: 'doc-abc' } };
-  await processarEventoNaoCritico(p);
-  const tam1 = eventosProcessados.size;
-  await processarEventoNaoCritico(p);
-  assert('doc_refused no Set (fallback)', eventosProcessados.has('doc_refused:doc-abc'));
-  assert('não cresceu na 2ª chamada',       eventosProcessados.size === tam1);
-}
-
-// ── [9] ──────────────────────────────────────────────────────────────────
-grupo('[9] Webhook com segredo errado \u2192 401');
-{
-  const orig = process.env.ZAPSIGN_WEBHOOK_SECRET;
-  process.env.ZAPSIGN_WEBHOOK_SECRET = 'certo';
-  const respostas = [];
-  const req = { method: 'POST', headers: { 'x-webhook-secret': 'errado' }, body: {} };
-  const res = { status: (code) => ({ json: (d) => { respostas.push({ code, d }); }, end: () => {} }) };
-  await webhookHandler(req, res);
-  process.env.ZAPSIGN_WEBHOOK_SECRET = orig || '';
-  assert('respondeu 401',    respostas[0] && respostas[0].code === 401);
-  assert('menciona secret',  respostas[0] && respostas[0].d && respostas[0].d.error.toLowerCase().includes('secret'));
-}
-
-// ── [9b] ─────────────────────────────────────────────────────────────────
-grupo('[9b] Webhook sem ZAPSIGN_WEBHOOK_SECRET configurado → 503 (fail-closed)');
-{
-  const orig = process.env.ZAPSIGN_WEBHOOK_SECRET;
-  delete process.env.ZAPSIGN_WEBHOOK_SECRET;
-  const respostas = [];
-  // Payload que, se aceito, dispararia gravação no Drive
-  const req = { method: 'POST', headers: {}, body: { event_type: 'doc_signed', document: { token: 'x' } } };
-  const res = { status: (code) => ({ json: (d) => { respostas.push({ code, d }); }, end: () => {} }) };
-  await webhookHandler(req, res);
-  if (orig === undefined) delete process.env.ZAPSIGN_WEBHOOK_SECRET;
-  else process.env.ZAPSIGN_WEBHOOK_SECRET = orig;
-  assert('respondeu 503',        respostas[0] && respostas[0].code === 503);
-  assert('não processou evento', respostas.length === 1);
-}
-
-// ── [10] ─────────────────────────────────────────────────────────────────
 grupo('[10] Provedor manual \u2192 SHA-256, instru\u00e7\u00f5es gov.br, sem rede');
 {
   const buf  = Buffer.from('%PDF-1.4 fake');
@@ -205,16 +69,39 @@ grupo('[10] Provedor manual \u2192 SHA-256, instru\u00e7\u00f5es gov.br, sem red
 }
 
 // ── [11] ─────────────────────────────────────────────────────────────────
-grupo('[11] ASSINATURA_PROVIDER ausente/inv\u00e1lido \u2192 cai em manual');
+grupo('[11] A assinatura \u00e9 sempre gov.br \u2014 n\u00e3o h\u00e1 provedor a escolher');
 {
-  function getProvName(name) {
-    const n = (name || 'manual').toLowerCase().trim();
-    try { return require('../api/assinatura/_providers/' + n + '.js') && n; }
-    catch { return 'manual'; }
-  }
-  assert('sem env \u2192 manual',  getProvName('') === 'manual');
-  assert('inv\u00e1lido \u2192 manual', getProvName('inexistente') === 'manual');
-  assert('zapsign \u2192 zapsign', getProvName('zapsign') === 'zapsign');
+  // Antes, ASSINATURA_PROVIDER trocava o provedor em tempo de execu\u00e7\u00e3o, e havia
+  // adaptadores de ZapSign e Adobe Sign. Foram removidos. Estes testes travam a
+  // decis\u00e3o: nenhuma vari\u00e1vel de ambiente pode voltar a desviar a assinatura
+  // para outro lugar, e nenhum adaptador de terceiro deve reaparecer.
+  const fs = require('fs');
+  const dirProv = path.join(__dirname, '../api/assinatura/_providers');
+  const provedores = fs.readdirSync(dirProv).filter(f => f.endsWith('.js')).sort();
+  assert('o \u00fanico provedor no diret\u00f3rio \u00e9 o manual (gov.br)',
+    provedores.length === 1 && provedores[0] === 'manual.js');
+
+  const origem = fs.readFileSync(path.join(__dirname, '../api/assinatura/index.js'), 'utf8');
+  assert('o roteador n\u00e3o l\u00ea ASSINATURA_PROVIDER',  !origem.includes('ASSINATURA_PROVIDER'));
+  assert('o roteador n\u00e3o carrega provedor din\u00e2mico', !/require\(`\.\/_providers\/\$\{/.test(origem));
+  assert('n\u00e3o sobrou refer\u00eancia a ZapSign no envio',
+    !/zapsign/i.test(origem.split('Hist\u00f3rico')[1] ? origem.split('Hist\u00f3rico')[0] : origem));
+
+  const semWebhook = !fs.existsSync(path.join(__dirname, '../api/assinatura/webhook.js'));
+  assert('webhook de terceiro n\u00e3o existe mais', semWebhook);
+
+  process.env.ASSINATURA_PROVIDER = 'zapsign';
+  delete require.cache[require.resolve('../api/assinatura/index.js')];
+  const rota = require('../api/assinatura/index.js');
+  let corpo = null;
+  const res = { setHeader() { return this; }, status() { return this; },
+                json(b) { corpo = b; return this; }, end() { return this; } };
+  await rota({ method: 'POST', headers: {}, body: { action: 'status' }, socket: {} }, res);
+  assert('mesmo com ASSINATURA_PROVIDER=zapsign, o status responde gov.br',
+    corpo && corpo.provedor === 'manual' && corpo.portal === 'gov.br');
+  assert('status n\u00e3o anuncia recurso de terceiro',
+    corpo && corpo.features.whatsapp === false && corpo.features.signUrls === false);
+  delete process.env.ASSINATURA_PROVIDER;
 }
 
 // ── [12] ─────────────────────────────────────────────────────────────────
@@ -243,76 +130,6 @@ grupo('[13] buildDoc: nenhuma âncora em modo físico nem para credora não-sign
 }
 
 // ── [14] ────────────────────────────────────────────────────────────────────────
-grupo('[14] construirPayload: <<devedor1>> correto (sem } extra) e indexação por papel');
-{
-  const p1 = construirPayload({
-    pdfBase64: 'dGVzdA==',
-    nomeDocumento: 'Termo',
-    externalId: 'T-001',
-    mensagem: '',
-    enviarWhatsapp: false,
-    credoraNome: 'Colégio Raizes',
-    dataLimite: '2026-12-31',
-    signatarios: [
-      { nome: 'João', email: 'j@x.com', papel: 'devedor', cpf: '' },
-    ],
-  });
-  const s = p1.signers[0];
-  assert('<<devedor1>> sem } extra',  s.signature_placement === '<<devedor1>>');
-  assert('não contém }>>',          !s.signature_placement.includes('}>>'));
-
-  // Dois devedores: índice independente
-  const p2 = construirPayload({
-    pdfBase64: 'dGVzdA==', nomeDocumento: 'T', externalId: 'T-002',
-    mensagem: '', enviarWhatsapp: false, credoraNome: 'C', dataLimite: '2026-12-31',
-    signatarios: [
-      { nome: 'A', email: 'a@x.com', papel: 'devedor',   cpf: '' },
-      { nome: 'B', email: 'b@x.com', papel: 'devedor',   cpf: '' },
-    ],
-  });
-  assert('1º devedor → <<devedor1>>',  p2.signers[0].signature_placement === '<<devedor1>>');
-  assert('2º devedor → <<devedor2>>',  p2.signers[1].signature_placement === '<<devedor2>>');
-}
-
-// ── [15] ────────────────────────────────────────────────────────────────────────
-grupo('[15] construirPayload: indexação por papel — credora não desloca devedor');
-{
-  const p = construirPayload({
-    pdfBase64: 'dGVzdA==', nomeDocumento: 'T', externalId: 'T-003',
-    mensagem: '', enviarWhatsapp: false, credoraNome: 'C', dataLimite: '2026-12-31',
-    signatarios: [
-      { nome: 'Rep', email: 'rep@x.com', papel: 'credora',  cpf: '' },
-      { nome: 'Dev', email: 'd@x.com',   papel: 'devedor',  cpf: '' },
-    ],
-  });
-  assert('credora → <<credora1>>', p.signers[0].signature_placement === '<<credora1>>');
-  assert('devedor → <<devedor1>>', p.signers[1].signature_placement === '<<devedor1>>');
-  assert('devedor não fica <<devedor2>>', p.signers[1].signature_placement !== '<<devedor2>>');
-}
-
-// ── [16] ────────────────────────────────────────────────────────────────────────
-grupo('[16] buscarSignedFile: chama API ZapSign e retorna signed_file fresco (não usa URL do payload)');
-{
-  const { buscarSignedFile } = require('../api/assinatura/_providers/zapsign');
-  const origFetch = global.fetch;
-  let urlChamada = '';
-  global.fetch = async (url) => {
-    urlChamada = url;
-    return {
-      ok: true,
-      json: async () => ({ token: 'doc-abc', status: 'signed', signed_file: 'https://storage.zapsign.com.br/fresh.pdf', signers: [] }),
-    };
-  };
-  process.env.ZAPSIGN_API_TOKEN = 'token-teste';
-  const url = await buscarSignedFile('doc-abc');
-  global.fetch = origFetch;
-  delete process.env.ZAPSIGN_API_TOKEN;
-
-  assert('buscarSignedFile retorna URL fresca', url === 'https://storage.zapsign.com.br/fresh.pdf');
-  assert('chamou endpoint de detalhe (não URL do payload)', urlChamada.includes('/docs/doc-abc/'));
-}
-
-// ── [17] ────────────────────────────────────────────────────────────────────────
 grupo('[17] Rota /api/assinatura: PDF > 10 MB bloqueado ANTES de chamar o provider');
 {
   // Confirma que index.js chama validarPDF() e rejeita sem acionar o provider
@@ -358,52 +175,6 @@ grupo('[17] Rota /api/assinatura: PDF > 10 MB bloqueado ANTES de chamar o provid
 }
 
 // ── [18] ─────────────────────────────────────────────────────────────────
-grupo('[18] action=pendencias: requer JWT; sem SA retorna {}; mock com dados aparece');
-{
-  const handler = require('../api/assinatura/index');
-  const drive   = require('../api/assinatura/_drive');
-
-  const mkReq = (body, jwtToken) => ({
-    method: 'POST',
-    headers: { origin: '', 'x-forwarded-for': '127.0.0.1',
-      ...(jwtToken ? { authorization: `Bearer ${jwtToken}` } : {}) },
-    body,
-    socket: { remoteAddress: '127.0.0.1' },
-  });
-  const mkRes = () => {
-    const r = [];
-    return { setHeader: () => {}, status: (c) => ({ json: (d) => r.push({ c, d }), end: () => {} }), _r: r };
-  };
-
-  // Sem JWT → 401
-  const r1 = mkRes();
-  await handler(mkReq({ action: 'pendencias' }), r1);
-  assert('sem JWT → 401', r1._r[0]?.c === 401);
-
-  // Com JWT do usuário de teste; pular se banco indisponível
-  if (!testJwt) {
-    console.log('  ⊘ [18] banco não disponível para criar usuário de teste — ignorado');
-    passou += 3;
-  } else {
-  const tok = testJwt;
-  delete process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-
-  const r2 = mkRes();
-  await handler(mkReq({ action: 'pendencias' }, tok), r2);
-  assert('sem SA → 200 com {}', r2._r[0]?.c === 200 && typeof r2._r[0]?.d === 'object');
-
-  // Com JWT + mock retorna dados de pendência
-  const orig = drive.lerPendencias;
-  const fakePend = { 'doc_signed:tok-abc': { zapsignToken: 'tok-abc', failCount: 3, status: 'permanente' } };
-  drive.lerPendencias = async () => fakePend;
-  const r3 = mkRes();
-  await handler(mkReq({ action: 'pendencias' }, tok), r3);
-  drive.lerPendencias = orig;
-  assert('dados mockados aparecem', r3._r[0]?.d?.['doc_signed:tok-abc']?.zapsignToken === 'tok-abc');
-  } // else (testJwt disponível)
-}
-
-// ── [19] ─────────────────────────────────────────────────────────────────
 grupo('[19] Fecho: vias presentes no físico; ausentes no eletrônico; testemunhas sem label "opcional"');
 {
   const src = html;

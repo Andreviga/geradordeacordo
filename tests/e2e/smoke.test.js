@@ -34,11 +34,7 @@ async function mockAPIs(page) {
       body:        JSON.stringify({ token: jwtFakeCliente() }),
     });
   });
-  // Mock do adobe-sign (legado) e da nova rota /api/assinatura
-  await page.route('/api/adobe-sign', async route => {
-    await route.fulfill({ status: 200, contentType: 'application/json',
-      body: JSON.stringify({ configured: false }) });
-  });
+  // Mock de /api/assinatura (preparação do documento para o gov.br)
   await page.route('/api/assinatura', async route => {
     let action;
     try { action = route.request().postDataJSON()?.action; } catch { action = null; }
