@@ -109,19 +109,30 @@ npm run db:restore -- backup-weekly-2026-W31.json.gz --tabela=acordos
 
 ### Restore de teste trimestral
 
-O teste que antes era manual virou script:
+O teste que antes era manual virou script, e roda junto com `npm test`:
 
 ```bash
 npm run test:restore
 ```
 
-Ele semeia dados sintéticos cobrindo as 13 tabelas (JSONB, datas, BIGINT em
-centavos, FKs, acentuação), gera um backup no formato exato do cron, destrói e
-adultera os dados, restaura e compara linha a linha com o original.
+Ele semeia dados cobrindo as 13 tabelas (JSONB, datas, BIGINT em centavos, FKs,
+acentuação), gera um backup no formato exato do cron, destrói e adultera os
+dados, restaura com o mesmo núcleo do `db:restore` e compara linha a linha com o
+original.
 
-Só roda contra `localhost` ou `BANCO_TESTE_HOST` — recusa qualquer outro destino,
-porque apaga dados de propósito. Para um banco descartável em outro host, use
-`--descartavel`.
+Por padrão usa **PGlite** — PostgreSQL 18 compilado para WASM, rodando dentro do
+próprio processo. Não precisa de Docker, servidor nem rede, então roda igual em
+qualquer máquina e em CI.
+
+Para conferir contra o Postgres real de tempos em tempos:
+
+```bash
+npm run test:restore -- --postgres
+```
+
+Nesse modo ele só aceita `localhost` ou `BANCO_TESTE_HOST` — recusa qualquer
+outro destino, porque apaga dados de propósito. Para um banco descartável em
+outro host, acrescente `--descartavel`.
 
 Registre a data e o resultado a cada execução (ex.: "Restore testado em
 2026-10-05, 347 acordos, OK").

@@ -99,6 +99,78 @@ function perguntar(texto) {
   return new Promise(res => rl.question(texto, r => { rl.close(); res(r.trim()); }));
 }
 
+// ── Núcleo ────────────────────────────────────────────────────────────────────
+// Separado do main() para que o teste de integração o acione com qualquer
+// cliente que tenha .query() — inclusive o PGlite, que roda dentro do processo.
+
+/**
+ * Confere se o banco alvo comporta o dump. Não escreve nada.
+ * @returns {{problemas: string[], resumo: Array<{tabela,hoje,dump}>}}
+ */
+async function conferirSchema(client, ordem, dump) {
+  const problemas = [], resumo = [];
+  for (const t of ordem) {
+    const doBanco = await colunasDoBanco(client, t);
+    if (!doBanco.size) {
+      problemas.push(`tabela "${t}" nao existe no banco alvo — rode npm run db:migrate`);
+      continue;
+    }
+    const linhas   = dump.dados[t];
+    const doDump   = linhas.length ? Object.keys(linhas[0]) : [];
+    const ausentes = doDump.filter(c => !doBanco.has(c));
+    if (ausentes.length)
+      problemas.push(`"${t}": colunas no dump que nao existem no banco: ${ausentes.join(', ')}`);
+    const { rows } = await client.query(`SELECT COUNT(*)::int n FROM "${t}"`);
+    resumo.push({ tabela: t, hoje: rows[0].n, dump: linhas.length });
+  }
+  return { problemas, resumo };
+}
+
+/**
+ * TRUNCATE + INSERT + conferência, tudo em uma transação.
+ * Divergiu a contagem, ou --dry-run: ROLLBACK. Caso contrário, COMMIT.
+ * @returns {{commitado: boolean, divergencias: string[], gravadas: object, ms: number}}
+ */
+async function executarRestore(client, ordem, dump, { dryRun = false, aoGravar = () => {} } = {}) {
+  const t0 = Date.now();
+  const gravadas = {};
+  const divergencias = [];
+  await client.query('BEGIN');
+  try {
+    // TRUNCATE unico resolve dependencias circulares de uma vez, ao contrario de
+    // truncar tabela a tabela dentro do laco (que so funciona pela ordem certa).
+    await client.query(`TRUNCATE ${ordem.map(t => `"${t}"`).join(', ')} CASCADE`);
+
+    for (const t of ordem) {
+      gravadas[t] = await inserirTabela(client, t, dump.dados[t]);
+      aoGravar(t, gravadas[t]);
+    }
+
+    // Conferencia DENTRO da transacao, antes de decidir COMMIT
+    for (const t of ordem) {
+      const { rows } = await client.query(`SELECT COUNT(*)::int n FROM "${t}"`);
+      const esperado = dump.dados[t].length;
+      if (rows[0].n !== esperado)
+        divergencias.push(`"${t}": esperado ${esperado}, encontrado ${rows[0].n}`);
+    }
+
+    if (divergencias.length || dryRun) {
+      await client.query('ROLLBACK');
+      return { commitado: false, divergencias, gravadas, ms: Date.now() - t0 };
+    }
+    await client.query('COMMIT');
+    return { commitado: true, divergencias, gravadas, ms: Date.now() - t0 };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    throw e;
+  }
+}
+
+/** Ordem de restauração: a do engine (pai antes de filho), filtrada pelo dump. */
+function ordemDeRestauracao(dump, TABELAS) {
+  return TABELAS.filter(t => Array.isArray(dump.dados[t]));
+}
+
 // ── Principal ─────────────────────────────────────────────────────────────────
 async function main() {
   require('./db-utils').loadEnv();
@@ -121,8 +193,7 @@ async function main() {
   console.log(`  Arquivo : ${path.basename(arquivo)} (${(bytes / 1024).toFixed(1)} KB${ehGzip ? ', gzip' : ''})`);
   console.log(`  Gerado  : ${geradoEm ? new Date(geradoEm).toLocaleString('pt-BR') : C.y + 'sem _meta.gerado_em' + C.x}`);
 
-  // Ordem de restauracao: a do engine (pai antes de filho), filtrada pelo dump
-  let ordem = TABELAS.filter(t => Array.isArray(dump.dados[t]));
+  let ordem = ordemDeRestauracao(dump, TABELAS);
   const extras   = Object.keys(dump.dados).filter(t => !TABELAS.includes(t));
   const faltando = TABELAS.filter(t => !Array.isArray(dump.dados[t]));
   if (extras.length)   aviso(`Tabelas no dump que o sistema nao conhece (ignoradas): ${extras.join(', ')}`);
@@ -147,19 +218,9 @@ async function main() {
     // Conferencia de schema ANTES de qualquer escrita
     console.log(`\n${C.b}Conferindo o banco alvo${C.x}`);
     console.log(`  Host: ${C.b}${host}${C.x}`);
-    let problemas = 0;
-    const resumo = [];
-    for (const t of ordem) {
-      const doBanco = await colunasDoBanco(client, t);
-      if (!doBanco.size) { erro(`tabela "${t}" nao existe no banco alvo — rode npm run db:migrate`); problemas++; continue; }
-      const linhas   = dump.dados[t];
-      const doDump   = linhas.length ? Object.keys(linhas[0]) : [];
-      const ausentes = doDump.filter(c => !doBanco.has(c));
-      if (ausentes.length) { erro(`"${t}": colunas no dump que nao existem no banco: ${ausentes.join(', ')}`); problemas++; }
-      const { rows } = await client.query(`SELECT COUNT(*)::int n FROM "${t}"`);
-      resumo.push({ tabela: t, hoje: rows[0].n, dump: linhas.length });
-    }
-    if (problemas) {
+    const { problemas, resumo } = await conferirSchema(client, ordem, dump);
+    problemas.forEach(erro);
+    if (problemas.length) {
       console.error(`\n${C.r}Schema incompativel — nada foi alterado.${C.x}\n`);
       process.exitCode = 1;
       return;
@@ -188,39 +249,25 @@ async function main() {
 
     // ── Transacao ───────────────────────────────────────────────────────────
     console.log(`\n${C.b}Restaurando${C.x}`);
-    const t0 = Date.now();
-    await client.query('BEGIN');
-    // TRUNCATE unico resolve dependencias circulares de uma vez, ao contrario de
-    // truncar tabela a tabela dentro do laco (que so funciona pela ordem certa).
-    await client.query(`TRUNCATE ${ordem.map(t => `"${t}"`).join(', ')} CASCADE`);
-    ok(`TRUNCATE em ${ordem.length} tabela(s)`);
+    const r = await executarRestore(client, ordem, dump, {
+      dryRun,
+      aoGravar: (t, n) => console.log(`  ${C.d}·${C.x} ${t.padEnd(22)} ${String(n).padStart(7)} linha(s)`),
+    });
 
-    for (const t of ordem) {
-      const n = await inserirTabela(client, t, dump.dados[t]);
-      console.log(`  ${C.d}·${C.x} ${t.padEnd(22)} ${String(n).padStart(7)} linha(s)`);
-    }
-
-    // Conferencia DENTRO da transacao, antes de decidir COMMIT
-    let divergencia = 0;
-    for (const r of resumo) {
-      const { rows } = await client.query(`SELECT COUNT(*)::int n FROM "${r.tabela}"`);
-      if (rows[0].n !== r.dump) { erro(`"${r.tabela}": esperado ${r.dump}, encontrado ${rows[0].n}`); divergencia++; }
-    }
-    if (divergencia) {
-      await client.query('ROLLBACK');
+    if (r.divergencias.length) {
+      r.divergencias.forEach(erro);
       console.error(`\n${C.r}Contagens divergentes — ROLLBACK. Banco intacto.${C.x}\n`);
       process.exitCode = 1;
       return;
     }
     ok('contagens conferem com o backup');
 
+    const seg = (r.ms / 1000).toFixed(1);
     if (dryRun) {
-      await client.query('ROLLBACK');
-      console.log(`\n${C.g}${C.b}Ensaio concluido em ${((Date.now() - t0) / 1000).toFixed(1)}s — ROLLBACK dado, banco intacto.${C.x}`);
+      console.log(`\n${C.g}${C.b}Ensaio concluido em ${seg}s — ROLLBACK dado, banco intacto.${C.x}`);
       console.log(`${C.d}Rode sem --dry-run para valer.${C.x}\n`);
     } else {
-      await client.query('COMMIT');
-      console.log(`\n${C.g}${C.b}Restore concluido em ${((Date.now() - t0) / 1000).toFixed(1)}s — ${totalDump} linha(s).${C.x}`);
+      console.log(`\n${C.g}${C.b}Restore concluido em ${seg}s — ${totalDump} linha(s).${C.x}`);
       console.log(`${C.d}Confira com: npm run db:status${C.x}\n`);
     }
   } catch (e) {
@@ -236,4 +283,5 @@ async function main() {
 
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
 
-module.exports = { lerDump, inserirTabela, chunk, colunasDoBanco };
+module.exports = { lerDump, inserirTabela, chunk, colunasDoBanco,
+                    conferirSchema, executarRestore, ordemDeRestauracao };
