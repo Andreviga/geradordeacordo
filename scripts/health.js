@@ -202,8 +202,21 @@ function checkEnvVars() {
   check('ALLOWED_ORIGIN', true,  'URL de produção sem barra final (ex: https://geradordeacordo.vercel.app)');
 
 
-  check('GOOGLE_SERVICE_ACCOUNT_JSON', false, 'Necessário para salvar PDFs no Drive');
-  check('DRIVE_PDF_FOLDER_ID', false, 'Pasta de destino dos PDFs assinados');
+  check('CRON_SECRET',    true,  'Sem ela, lembretes e backup respondem 401 e nunca rodam');
+
+  check('GOOGLE_SERVICE_ACCOUNT_JSON', false, 'Necessário para o backup semanal e o PDF no Drive');
+  check('DRIVE_PDF_FOLDER_ID', false, 'Pasta de destino do PDF na importação retroativa');
+  // Sem esta, executarBackup() lança antes de ler o banco: o backup semanal
+  // falha toda segunda, e só aparece no log do Vercel.
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON && !process.env.DRIVE_BACKUP_FOLDER_ID)
+    FAIL('DRIVE_BACKUP_FOLDER_ID ausente — o backup semanal falha a cada execução',
+      'Crie a pasta no Drive Compartilhado, compartilhe com a service account e copie o ID da URL');
+  else
+    check('DRIVE_BACKUP_FOLDER_ID', false, 'Pasta de destino dos backups semanais');
+
+  check('EMAIL_FROM',               false, 'Remetente dos lembretes');
+  check('CONTATO_SECRETARIA_EMAIL', false, 'Aparece no corpo do lembrete e no replyTo');
+  check('CONTATO_SECRETARIA_FONE',  false, 'Aparece no corpo do lembrete');
 
   // Variáveis que devem ser removidas
   const legadas = ['APP_PASSWORD_HASH', 'ADOBE_SIGN_INTEGRATION_KEY', 'ADOBE_SIGN_REGION',
