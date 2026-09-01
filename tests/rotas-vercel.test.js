@@ -97,34 +97,43 @@ grupo('[4] Handlers de cron aceitam GET (é como o scheduler do Vercel dispara)'
   const agendados = (vercel.crons || []).map(c => c.path);
   assert('crons declarados no vercel.json', agendados.length > 0);
 
-  // Teste de comportamento, não de texto: chama o handler com GET e sem segredo.
-  // Tem que parar em 401 (chegou na verificação de auth) e nunca em 405 — e não
-  // executa nada, porque o segredo não confere.
+  // Teste de comportamento, não de texto. Duas causas diferentes precisam de
+  // respostas diferentes: sem CRON_SECRET no servidor é erro de configuração
+  // (503); com segredo configurado e header errado é credencial (401).
+  // Quando as duas davam 401, uma execução que falhava não dizia qual era —
+  // e o backup passou semanas sem rodar sem que se soubesse por quê.
   const semSegredo = process.env.CRON_SECRET;
-  delete process.env.CRON_SECRET;
   const pendentes = [];
   const cronHandler = require(path.join(raiz, 'api/cron/index.js'));
+  const chamar = (headers, query) => {
+    let status = null;
+    const res = { status(c) { status = c; return this; }, json() { return this; }, end() { return this; } };
+    return Promise.resolve(cronHandler({ method: 'GET', headers, query }, res)).then(() => status);
+  };
+
+  delete process.env.CRON_SECRET;
   for (const job of ['lembretes', 'backup', 'retencao']) {
-    let status = null;
-    const res = { status(c) { status = c; return this; }, json() { return this; }, end() { return this; } };
-    pendentes.push(
-      Promise.resolve(cronHandler({ method: 'GET', headers: {}, query: { job } }, res)).then(() => {
-        assert(`cron ${job}: GET não é recusado com 405`, status !== 405);
-        assert(`cron ${job}: GET chega na verificação do segredo (401)`, status === 401);
-      })
-    );
+    pendentes.push(chamar({}, { job }).then(status => {
+      assert(`cron ${job}: GET não é recusado com 405`, status !== 405);
+      assert(`cron ${job}: sem CRON_SECRET no servidor → 503, não 401`, status === 503);
+    }));
   }
-  // Job desconhecido também para em 401: a autenticação vem antes de revelar
-  // quais jobs existem.
-  {
-    let status = null;
-    const res = { status(c) { status = c; return this; }, json() { return this; }, end() { return this; } };
-    pendentes.push(
-      Promise.resolve(cronHandler({ method: 'GET', headers: {}, query: { job: 'inventado' } }, res)).then(() => {
-        assert('cron job inexistente não vaza antes da auth (401)', status === 401);
-      })
-    );
-  }
+
+  process.env.CRON_SECRET = 'segredo-de-teste';
+  pendentes.push(chamar({}, { job: 'backup' }).then(status =>
+    assert('com segredo configurado e header ausente → 401', status === 401)));
+  pendentes.push(chamar({ authorization: 'Bearer errado' }, { job: 'backup' }).then(status =>
+    assert('segredo errado → 401', status === 401)));
+  // A pegadinha que motivou o trim: segredo colado no painel com quebra de linha
+  pendentes.push((async () => {
+    process.env.CRON_SECRET = 'segredo-de-teste\n';
+    const status = await chamar({ authorization: 'Bearer segredo-de-teste' }, { job: 'inventado' });
+    process.env.CRON_SECRET = 'segredo-de-teste';
+    assert('segredo com quebra de linha no fim ainda casa (trim dos dois lados)', status === 404);
+  })());
+  // Job desconhecido só é revelado depois da auth
+  pendentes.push(chamar({}, { job: 'inventado' }).then(status =>
+    assert('job inexistente não vaza antes da auth (401, não 404)', status === 401)));
   const srcCron = fs.readFileSync(path.join(raiz, 'api/cron/index.js'), 'utf8');
   assert('api/cron/index.js exige CRON_SECRET', srcCron.includes('CRON_SECRET'));
   // O nome do job precisa sobreviver mesmo se o rewrite não preencher a query

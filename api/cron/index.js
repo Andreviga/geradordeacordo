@@ -20,6 +20,7 @@
 // GET fazia os dois crons responderem 405 a cada execução — confirmado em
 // produção — e nada jamais rodava. POST segue aceito para invocação manual.
 
+const crypto = require('crypto');
 const { getPool } = require('../_db');
 
 // 'retencao' existe como endpoint mas NÃO está agendado no vercel.json: apaga
@@ -39,11 +40,24 @@ module.exports = async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'POST')
     return res.status(405).json({ error: 'Method not allowed' });
 
-  // Autenticação antes de escolher o ramo, e antes de revelar se o job existe
-  const secret = process.env.CRON_SECRET;
-  const token  = (req.headers['authorization'] || '').replace('Bearer ', '').trim();
-  if (!secret || token !== secret)
-    return res.status(401).json({ error: 'Unauthorized' });
+  // Autenticação antes de escolher o ramo, e antes de revelar se o job existe.
+  //
+  // 503 e 401 são casos diferentes e antes eram o mesmo: segredo ausente no
+  // servidor é erro de configuração, não credencial errada. Como os dois davam
+  // 401, uma execução que falhava não dizia se faltava a variável ou se o header
+  // não estava chegando — e o backup ficou semanas sem rodar sem que se soubesse
+  // por quê.
+  const secret = (process.env.CRON_SECRET || '').trim();
+  if (!secret)
+    return res.status(503).json({ error: 'CRON_SECRET não configurado no servidor.' });
+
+  // O trim dos dois lados evita a pegadinha de colar o segredo no painel com
+  // quebra de linha no fim: invisível, e faz a comparação falhar para sempre.
+  const recebido = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
+  const a = Buffer.from(recebido), b = Buffer.from(secret);
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!ok)
+    return res.status(401).json({ error: 'Unauthorized', dica: 'Envie Authorization: Bearer $CRON_SECRET' });
 
   const job = jobDaRota(req);
   if (!JOBS.includes(job))
