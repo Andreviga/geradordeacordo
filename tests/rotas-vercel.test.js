@@ -103,19 +103,33 @@ grupo('[4] Handlers de cron aceitam GET (é como o scheduler do Vercel dispara)'
   const semSegredo = process.env.CRON_SECRET;
   delete process.env.CRON_SECRET;
   const pendentes = [];
-  for (const rel of ['api/cron/lembretes.js', 'api/cron/backup.js']) {
-    const handler = require(path.join(raiz, rel));
+  const cronHandler = require(path.join(raiz, 'api/cron/index.js'));
+  for (const job of ['lembretes', 'backup']) {
     let status = null;
     const res = { status(c) { status = c; return this; }, json() { return this; }, end() { return this; } };
     pendentes.push(
-      Promise.resolve(handler({ method: 'GET', headers: {} }, res)).then(() => {
-        assert(`${rel}: GET não é recusado com 405`, status !== 405);
-        assert(`${rel}: GET chega na verificação do segredo (401)`, status === 401);
+      Promise.resolve(cronHandler({ method: 'GET', headers: {}, query: { job } }, res)).then(() => {
+        assert(`cron ${job}: GET não é recusado com 405`, status !== 405);
+        assert(`cron ${job}: GET chega na verificação do segredo (401)`, status === 401);
       })
     );
-    const src = fs.readFileSync(path.join(raiz, rel), 'utf8');
-    assert(`${rel} exige CRON_SECRET`, src.includes('CRON_SECRET'));
   }
+  // Job desconhecido também para em 401: a autenticação vem antes de revelar
+  // quais jobs existem.
+  {
+    let status = null;
+    const res = { status(c) { status = c; return this; }, json() { return this; }, end() { return this; } };
+    pendentes.push(
+      Promise.resolve(cronHandler({ method: 'GET', headers: {}, query: { job: 'inventado' } }, res)).then(() => {
+        assert('cron job inexistente não vaza antes da auth (401)', status === 401);
+      })
+    );
+  }
+  const srcCron = fs.readFileSync(path.join(raiz, 'api/cron/index.js'), 'utf8');
+  assert('api/cron/index.js exige CRON_SECRET', srcCron.includes('CRON_SECRET'));
+  // O nome do job precisa sobreviver mesmo se o rewrite não preencher a query
+  assert('jobDaRota lê do rewrite',   cronHandler.jobDaRota({ query: { job: 'backup' } }) === 'backup');
+  assert('jobDaRota cai para req.url', cronHandler.jobDaRota({ url: '/api/cron/lembretes' }) === 'lembretes');
   Promise.all(pendentes).then(() => {
     if (semSegredo !== undefined) process.env.CRON_SECRET = semSegredo;
   });
@@ -125,7 +139,19 @@ grupo('[4] Handlers de cron aceitam GET (é como o scheduler do Vercel dispara)'
     const semQuery = p.split('?')[0];
     const arq = path.join(raiz, semQuery.replace(/^\//, '') + '.js');
     const idx = path.join(raiz, semQuery.replace(/^\//, ''), 'index.js');
-    assert(`${p} tem handler`, fs.existsSync(arq) || fs.existsSync(idx));
+
+    // O caminho agendado pode ser servido direto por um arquivo OU chegar lá por
+    // um rewrite — é o caso de /api/cron/lembretes, que o vercel.json reescreve
+    // para /api/cron?job=lembretes desde que os dois crons viraram uma função só.
+    const porRewrite = (vercel.rewrites || []).some(rw => {
+      const re = new RegExp('^' + rw.source.replace(/:[A-Za-z0-9_]+\*/g, '.+').replace(/:[A-Za-z0-9_]+/g, '[^/]+') + '$');
+      if (!re.test(semQuery)) return false;
+      const destino = rw.destination.split('?')[0].replace(/^\//, '');
+      return fs.existsSync(path.join(raiz, destino + '.js'))
+          || fs.existsSync(path.join(raiz, destino, 'index.js'));
+    });
+
+    assert(`${p} tem handler (arquivo ou rewrite)`, fs.existsSync(arq) || fs.existsSync(idx) || porRewrite);
   }
 }
 
@@ -151,7 +177,43 @@ grupo('[5] Comportamento real do wrapper com o payload do rewrite');
     assert('POST /api/parcelas/:id/baixar via rewrite → 401 (rota encontrada)', status === 401);
     assert('não caiu em 404 de rota', status !== 404);
     process.env.JWT_SECRET = origSecret;
+
+    limiteDeFuncoes();
+
     console.log(`\nResultado: ${passou} ✓  ${falhou} ✗`);
     if (falhou > 0) process.exit(1);
   });
+}
+
+// ── [6] ───────────────────────────────────────────────────────────────────────
+// O plano Hobby do Vercel recusa o deployment inteiro acima de 12 funções
+// serverless, e a mensagem só aparece no log de build — depois do push, com o
+// deploy já falhado. Isto falha antes, aqui.
+function limiteDeFuncoes() {
+  grupo('[6] Limite de funções serverless do plano Hobby');
+  const LIMITE = 12;
+
+  const funcoes = [];
+  (function varrer(dir, base = '') {
+    for (const entrada of fs.readdirSync(dir, { withFileTypes: true })) {
+      const rel = base ? `${base}/${entrada.name}` : entrada.name;
+      if (entrada.isDirectory()) { varrer(path.join(dir, entrada.name), rel); continue; }
+      if (!entrada.name.endsWith('.js')) continue;
+      // Arquivos com prefixo _ são módulos privados: o Vercel não os transforma
+      // em função, e é justamente por isso que os catch-all viraram _handler.js.
+      if (rel.split('/').some(p => p.startsWith('_'))) continue;
+      funcoes.push('api/' + rel);
+    }
+  })(path.join(raiz, 'api'));
+
+  assert(`${funcoes.length} função(ões) — no máximo ${LIMITE}`, funcoes.length <= LIMITE);
+  if (funcoes.length > LIMITE) {
+    console.error('    O build do Vercel vai falhar. Funções encontradas:');
+    funcoes.forEach(f => console.error('      ' + f));
+    console.error('    Funda rotas irmãs numa função só (ex.: api/painel.js, api/cron/index.js).');
+  } else if (funcoes.length === LIMITE) {
+    console.log(`    ⚠  no teto: o próximo endpoint quebra o build`);
+  } else {
+    console.log(`    folga: ${LIMITE - funcoes.length} slot(s)`);
+  }
 }

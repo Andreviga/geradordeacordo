@@ -1,6 +1,6 @@
 'use strict';
 // api/cron/_lembretes_engine.js — lógica central de lembretes.
-// Chamada pelo handler HTTP (api/cron/lembretes.js) e pelo script CLI (scripts/cron-lembretes.js).
+// Chamada pelo handler HTTP (api/cron/index.js) e pelo script CLI (scripts/cron-lembretes.js).
 
 const { getPool }            = require('../_db');
 const { calcularEvento }     = require('./_calcularEvento');

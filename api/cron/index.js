@@ -1,0 +1,75 @@
+'use strict';
+// api/cron/index.js — os dois crons numa função só.
+//
+//   GET|POST /api/cron/lembretes   → lembretes de vencimento (seg–sex, 12h UTC)
+//   GET|POST /api/cron/backup      → dump do banco no Drive (seg, 06h UTC)
+//
+// As URLs continuam as mesmas: o vercel.json reescreve /api/cron/:job para
+// /api/cron?job=:job. Foi preciso porque o roteamento por sistema de arquivos do
+// Vercel não entrega sub-rotas para dir/index.js — o mesmo motivo dos rewrites
+// de acordos e parcelas (ver api/_rota.js).
+//
+// Por que estão juntas: o plano Hobby limita a 12 funções serverless por
+// deployment e estávamos em 12/12. Fundir as duas libera um slot. São as
+// candidatas mais naturais: mesma autenticação (CRON_SECRET), mesmos métodos,
+// nenhuma lógica compartilhada com o resto do sistema, e o trabalho pesado já
+// vive nos motores (_lembretes_engine.js e _backup_engine.js).
+//
+// Autenticação: Authorization: Bearer $CRON_SECRET.
+// O scheduler do Vercel dispara com GET e manda o segredo nesse header. Recusar
+// GET fazia os dois crons responderem 405 a cada execução — confirmado em
+// produção — e nada jamais rodava. POST segue aceito para invocação manual.
+
+const { getPool } = require('../_db');
+
+const JOBS = ['lembretes', 'backup'];
+
+/** Nome do job: vem do rewrite (?job=) ou, se ele falhar, da própria URL. */
+function jobDaRota(req) {
+  const doRewrite = String((req.query && req.query.job) || '').trim();
+  if (doRewrite) return doRewrite;
+  const caminho = String(req.url || '').split('?')[0];
+  return caminho.replace(/^\/api\/cron\/?/, '').split('/').filter(Boolean)[0] || '';
+}
+
+module.exports = async (req, res) => {
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'GET' && req.method !== 'POST')
+    return res.status(405).json({ error: 'Method not allowed' });
+
+  // Autenticação antes de escolher o ramo, e antes de revelar se o job existe
+  const secret = process.env.CRON_SECRET;
+  const token  = (req.headers['authorization'] || '').replace('Bearer ', '').trim();
+  if (!secret || token !== secret)
+    return res.status(401).json({ error: 'Unauthorized' });
+
+  const job = jobDaRota(req);
+  if (!JOBS.includes(job))
+    return res.status(404).json({ error: `Job desconhecido. Aceito: ${JOBS.join(', ')}` });
+
+  // O backup precisa do banco; os lembretes abrem a conexão por conta própria
+  let pool = null;
+  if (job === 'backup') {
+    pool = getPool();
+    if (!pool) return res.status(503).json({ error: 'DATABASE_URL não configurado' });
+  }
+
+  try {
+    let result;
+    if (job === 'lembretes') {
+      const { executarLembretes } = require('./_lembretes_engine');
+      result = await executarLembretes({ dryRun: false });
+    } else {
+      const { executarBackup } = require('./_backup_engine');
+      result = await executarBackup(pool);
+    }
+    console.log(`[cron/${job}] concluído:`, result);
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error(`[cron/${job}] erro:`, err.message);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports.jobDaRota = jobDaRota;
+module.exports.JOBS      = JOBS;

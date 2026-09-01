@@ -30,6 +30,11 @@ Sistema de geração e gestão de Termos de Confissão de Dívida com banco de d
 
 O cron `/api/cron/backup` roda toda segunda-feira às 06h UTC (03h BRT).
 
+> Os dois crons (`/api/cron/lembretes` e `/api/cron/backup`) são atendidos pela
+> mesma função, `api/cron/index.js` — o `vercel.json` reescreve `/api/cron/:job`
+> para `/api/cron?job=:job`. Foram fundidos para caber no limite de 12 funções
+> serverless do plano Hobby. As URLs não mudaram.
+
 - **Semanal**: `backup-weekly-YYYY-WW.json.gz` — retém as 4 últimas semanas.
 - **Mensal**: `backup-monthly-YYYY-MM.json.gz` (gerado na primeira segunda do mês) — retém os 12 últimos meses.
 - **Destino**: pasta `DRIVE_BACKUP_FOLDER_ID` no Drive Compartilhado (mesma service account dos PDFs).
