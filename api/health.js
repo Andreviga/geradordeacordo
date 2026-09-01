@@ -39,14 +39,14 @@ module.exports = async (req, res) => {
     JWT_SECRET:     !!process.env.JWT_SECRET,
     DATABASE_URL:   !!process.env.DATABASE_URL,
     ALLOWED_ORIGIN: !!process.env.ALLOWED_ORIGIN,
-    ASSINATURA_PROVIDER: process.env.ASSINATURA_PROVIDER || '(padrão: manual)',
+    ASSINATURA:     'gov.br',
     GOOGLE_DRIVE:   !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
     DRIVE_FOLDER:   !!process.env.DRIVE_PDF_FOLDER_ID,
-    ZAPSIGN:        !!process.env.ZAPSIGN_API_TOKEN,
     SMTP:           !!(process.env.SMTP_USER && process.env.SMTP_PASS),
     // Variáveis que devem ter sido removidas
     APP_PASSWORD_HASH_presente: !!process.env.APP_PASSWORD_HASH,
     ADOBE_presente:             !!(process.env.ADOBE_SIGN_INTEGRATION_KEY || process.env.ADOBE_SIGN_REGION),
+    ZAPSIGN_presente:           !!(process.env.ZAPSIGN_API_TOKEN || process.env.ZAPSIGN_WEBHOOK_SECRET),
   };
 
   if (!resultado.vars.JWT_SECRET || !resultado.vars.DATABASE_URL)

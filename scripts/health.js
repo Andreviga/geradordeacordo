@@ -2,7 +2,7 @@
 'use strict';
 // scripts/health.js — diagnóstico completo antes do uso em produção
 // Uso: npm run health
-// Testa: banco, Drive, ZapSign e SMTP.
+// Testa: banco, Drive e SMTP.
 
 require('./db-utils').loadEnv();
 const { getPool }                            = require('../api/_db');
@@ -167,42 +167,6 @@ async function checkDrive() {
   return true;
 }
 
-// ── ZapSign ───────────────────────────────────────────────────────────────────
-async function checkZapSign() {
-  HDR('ZapSign (assinatura digital)');
-  const token = process.env.ZAPSIGN_API_TOKEN;
-  const prov  = (process.env.ASSINATURA_PROVIDER || 'manual').toLowerCase();
-
-  if (prov === 'manual' && !token) {
-    SKIP('Provedor configurado como "manual" — ZapSign não ativo');
-    return null;
-  }
-  if (!token) {
-    SKIP('ZAPSIGN_API_TOKEN não configurado');
-    return null;
-  }
-
-  try {
-    const r = await fetch('https://api.zapsign.com.br/api/v1/docs/?page=1&page_size=1', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (r.ok) {
-      const d = await r.json();
-      OK(`ZapSign acessível — ${d.count ?? '?'} documento(s) na conta`);
-      return true;
-    } else if (r.status === 401) {
-      FAIL('ZAPSIGN_API_TOKEN inválido (401)', 'Verifique o token no painel ZapSign');
-      return false;
-    } else {
-      FAIL(`ZapSign respondeu ${r.status}`, 'Verifique a conectividade e o token');
-      return false;
-    }
-  } catch (err) {
-    FAIL(`ZapSign inacessível: ${err.message}`);
-    return false;
-  }
-}
-
 // ── SMTP (Gmail) ──────────────────────────────────────────────────────────────
 async function checkSMTP() {
   HDR('E-mail SMTP (lembretes — Etapa 5)');
@@ -236,13 +200,15 @@ function checkEnvVars() {
   check('JWT_SECRET',     true,  'Gere com: openssl rand -hex 32');
   check('DATABASE_URL',   true,  'Connection string do Neon');
   check('ALLOWED_ORIGIN', true,  'URL de produção sem barra final (ex: https://geradordeacordo.vercel.app)');
-  check('ASSINATURA_PROVIDER', false, 'Padrão: manual');
-  check('ZAPSIGN_API_TOKEN',   false, 'Necessário se ASSINATURA_PROVIDER=zapsign');
+
+
   check('GOOGLE_SERVICE_ACCOUNT_JSON', false, 'Necessário para salvar PDFs no Drive');
   check('DRIVE_PDF_FOLDER_ID', false, 'Pasta de destino dos PDFs assinados');
 
   // Variáveis que devem ser removidas
-  const legadas = ['APP_PASSWORD_HASH', 'ADOBE_SIGN_INTEGRATION_KEY', 'ADOBE_SIGN_REGION'];
+  const legadas = ['APP_PASSWORD_HASH', 'ADOBE_SIGN_INTEGRATION_KEY', 'ADOBE_SIGN_REGION',
+                   'ZAPSIGN_API_TOKEN', 'ZAPSIGN_WEBHOOK_SECRET', 'ZAPSIGN_VALIDATE_CPF',
+                   'ASSINATURA_PROVIDER'];
   for (const name of legadas) {
     if (process.env[name]) {
       FAIL(`${name} ainda presente — remover do Vercel`,
@@ -268,7 +234,6 @@ async function main() {
   checkEnvVars();
   const dbOk    = await checkDB();
   const drOk    = await checkDrive();
-  const zapOk   = await checkZapSign();
   const smtpOk  = await checkSMTP();
 
   console.log('\n' + '═'.repeat(44));
