@@ -35,14 +35,28 @@ module.exports = async (req, res) => {
   };
 
   // ── Variáveis de ambiente ────────────────────────────────────────────────
+  // Inventário completo do que o código lê. Toda variável nova precisa aparecer
+  // aqui — tests/env-health.test.js falha se alguma ficar de fora. A regra existe
+  // porque DRIVE_BACKUP_FOLDER_ID faltou no painel e o backup semanal abortava em
+  // silêncio: sem estar no health, não havia como perceber.
   resultado.vars = {
     JWT_SECRET:     !!process.env.JWT_SECRET,
     DATABASE_URL:   !!process.env.DATABASE_URL,
     ALLOWED_ORIGIN: !!process.env.ALLOWED_ORIGIN,
+    CRON_SECRET:    !!process.env.CRON_SECRET,
     ASSINATURA:     'gov.br',
     GOOGLE_DRIVE:   !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
     DRIVE_FOLDER:   !!process.env.DRIVE_PDF_FOLDER_ID,
+    DRIVE_BACKUP_FOLDER_ID: !!process.env.DRIVE_BACKUP_FOLDER_ID,
     SMTP:           !!(process.env.SMTP_USER && process.env.SMTP_PASS),
+    EMAIL_FROM:     !!process.env.EMAIL_FROM,
+    EMAIL_PROVIDER: process.env.EMAIL_PROVIDER || '(padrão)',
+    CONTATO_SECRETARIA_EMAIL: !!process.env.CONTATO_SECRETARIA_EMAIL,
+    CONTATO_SECRETARIA_FONE:  !!process.env.CONTATO_SECRETARIA_FONE,
+    // Opcionais, com padrão no código
+    APP_URL:                    process.env.APP_URL                    || '(padrão)',
+    RETENCAO_ANOS:              process.env.RETENCAO_ANOS              || '(padrão: 5)',
+    LEMBRETES_MAX_POR_EXECUCAO: process.env.LEMBRETES_MAX_POR_EXECUCAO || '(padrão: 5)',
     // Variáveis que devem ter sido removidas
     APP_PASSWORD_HASH_presente: !!process.env.APP_PASSWORD_HASH,
     ADOBE_presente:             !!(process.env.ADOBE_SIGN_INTEGRATION_KEY || process.env.ADOBE_SIGN_REGION),
@@ -51,6 +65,19 @@ module.exports = async (req, res) => {
 
   if (!resultado.vars.JWT_SECRET || !resultado.vars.DATABASE_URL)
     resultado.ok = false;
+
+  // O backup semanal aborta sem a pasta de destino. Falha silenciosa: o cron
+  // levanta, erra e ninguém fica sabendo — então o health precisa gritar.
+  if (resultado.vars.GOOGLE_DRIVE && !resultado.vars.DRIVE_BACKUP_FOLDER_ID) {
+    resultado.ok = false;
+    resultado.avisos = [...(resultado.avisos || []),
+      'DRIVE_BACKUP_FOLDER_ID ausente — o backup semanal falha a cada execução.'];
+  }
+  if (!resultado.vars.CRON_SECRET) {
+    resultado.ok = false;
+    resultado.avisos = [...(resultado.avisos || []),
+      'CRON_SECRET ausente — lembretes e backup respondem 401 e nunca rodam.'];
+  }
 
   // ── Banco de dados ───────────────────────────────────────────────────────
   const pool = getPool();
