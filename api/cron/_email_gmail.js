@@ -2,7 +2,7 @@
 /**
  * Adapter de e-mail para lembretes — Fase E, Etapa 5.
  *
- * Interface: send({ to, subject, text, html, replyTo })
+ * Interface: send({ to, subject, text, html, replyTo, attachments })
  *            Retorna Promise<{ messageId: string }> ou lança erro.
  *
  * Implementação atual: Gmail via SMTP (porta 587, STARTTLS).
@@ -49,6 +49,9 @@ async function send({ to, subject, text, html, replyTo, attachments }) {
     subject,
     text,
     html,
+    // Sem esta linha o backup por e-mail chegava sem o anexo, e tudo logava
+    // sucesso: o parâmetro era desestruturado acima e descartado aqui.
+    ...(attachments && attachments.length ? { attachments } : {}),
   });
   return { messageId: info.messageId };
 }
