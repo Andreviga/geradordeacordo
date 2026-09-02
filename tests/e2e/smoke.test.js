@@ -715,4 +715,28 @@ test.describe('P2 — verificações empíricas', () => {
     }
   });
 
+  // ── [D6] O exemplo do próprio app precisa passar na validação dele ────────
+  // O CNPJ do exemplo tinha um dígito trocado (…/0001-87 em vez de -37) e era
+  // recusado pelo próprio validador. Quem clicasse em "Exemplo" — o primeiro
+  // caminho que alguém tenta — encontrava a exportação bloqueada por um erro no
+  // CNPJ do colégio, sem ter digitado nada.
+  test('[D6] loadExample() gera dados que passam na validação de exportação', async ({ page }) => {
+    await autenticarP2(page);
+
+    const r = await page.evaluate(() => {
+      loadExample();
+      const v = validarExportacao();
+      return {
+        erros: (v.erros || []).map(e => e.msg),
+        cnpj: credoras[0] && credoras[0].doc,
+        cnpjValido: credoras.every(c => !c.doc || validarDocumento(c.doc, c.tipo)),
+        cpfsValidos: devedores.every(d => !d.cpf || validarCPF(d.cpf)),
+      };
+    });
+
+    expect(r.cnpjValido, `CNPJ do exemplo (${r.cnpj}) precisa ter dígito verificador válido`).toBe(true);
+    expect(r.cpfsValidos, 'CPFs do exemplo precisam ser válidos').toBe(true);
+    expect(r.erros, `exemplo não pode nascer com erro de exportação:\n${r.erros.join('\n')}`).toHaveLength(0);
+  });
+
 });
