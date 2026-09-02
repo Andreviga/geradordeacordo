@@ -132,8 +132,6 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 /* Âncoras de assinatura (texto branco sobre branco, invisível). Vestígio da
    integração ZapSign, removida: hoje não têm efeito, e ficaram porque mexer no
    corpo do documento exige nova revisão jurídica. */
-.sign-anchor{color:#fff;font-size:1pt;line-height:0;display:block;height:0;overflow:hidden}
-@media print{.sign-anchor{color:#fff}}
 
 /* ─── Modal de login ─── */
 .login-overlay{position:fixed;inset:0;background:rgba(18,32,58,.88);z-index:200;display:flex;align-items:center;justify-content:center}
@@ -1315,11 +1313,15 @@ function buildDoc(){
   const fd=parseDate(val('f_data'));
   h+=`<p style="text-align:center;margin-top:22px">${esc(val('f_local'))}, ${(!chk('op_datavazia')&&fd)?extDate(fd):'______ de __________________ de '+(fd?fd.getFullYear():new Date().getFullYear())}.</p>`;
 
-  const sign=(nome,papel,ancora)=>`<div class="sign">${ancora?`<span class="sign-anchor">${esc(ancora)}</span>`:''}<div class="line"></div><div class="who">${esc(nome)}</div><div class="role">${esc(papel)}</div></div>`;
-  const credoraAssina=modoElet&&chk('op_credora_assina');
+  // As âncoras de posicionamento saíram junto com a ZapSign: serviam para ela
+  // marcar onde a assinatura entraria na página. Eram invisíveis na tela (branco
+  // sobre branco), mas ficavam na camada de texto do documento — apareciam ao
+  // copiar o conteúdo ou extrair o texto do PDF. Sem a integração, eram só
+  // resíduo dentro de um instrumento jurídico.
+  const sign=(nome,papel)=>`<div class="sign"><div class="line"></div><div class="who">${esc(nome)}</div><div class="role">${esc(papel)}</div></div>`;
   h+='<div class="assinaturas">';
-  credoras.forEach((c,i)=>{ h+=sign(c.nome,'Credora'+(c.rep?' — '+c.rep:''),credoraAssina?`<<credora${i+1}>>`:null); });
-  devedores.forEach((d,i)=>{ h+=sign(d.nome,'Devedor(a)'+(md?' Solidário(a)':''),modoElet?`<<devedor${i+1}>>`:null); });
+  credoras.forEach(c=>{ h+=sign(c.nome,'Credora'+(c.rep?' — '+c.rep:'')); });
+  devedores.forEach(d=>{ h+=sign(d.nome,'Devedor(a)'+(md?' Solidário(a)':'')); });
   const t1=val('t1_nome'),t2=val('t2_nome'),c1=val('t1_cpf'),c2=val('t2_cpf');
   const temTest=t1||t2||c1||c2;
   if(!modoElet){
@@ -1690,8 +1692,7 @@ function _inlineToRuns(el){
         for(const x of n.childNodes)
           if(x.nodeType===3&&x.textContent)
             r+=`<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${_xmlEsc(x.textContent)}</w:t></w:r>`;
-      }else if(tag==='span'&&(n.className==='sign-anchor')){}
-      else r+=_inlineToRuns(n);
+      }else r+=_inlineToRuns(n);
     }
   }
   return r;
@@ -1741,7 +1742,7 @@ function _nodeToOoxml(el){
 }
 function _domToOoxml(rootEl){
   const clone=rootEl.cloneNode(true);
-  clone.querySelectorAll('.lh-header,.lh-footer,.lh-mark,.sign-anchor').forEach(e=>e.remove());
+  clone.querySelectorAll('.lh-header,.lh-footer,.lh-mark').forEach(e=>e.remove());
   let o='';for(const c of clone.children)o+=_nodeToOoxml(c);return o;
 }
 // Redimensiona o logo para max 4cm de largura (≈151px a 96dpi) para reduzir o DOCX

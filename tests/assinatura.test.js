@@ -105,28 +105,26 @@ grupo('[11] A assinatura \u00e9 sempre gov.br \u2014 n\u00e3o h\u00e1 provedor a
 }
 
 // ── [12] ─────────────────────────────────────────────────────────────────
-grupo('[12] Âncoras emitidas condicionalmente — somente em modo eletrônico');
+grupo('[12] O documento nao carrega mais ancoras de assinatura');
 {
-  assert('modoElet guarda âncora de devedor',
-    html.includes('modoElet?') && (html.includes('<<devedor') || html.includes('devedor${i+1}')));
-  assert('credoraAssina guarda âncora de credora',
-    html.includes('credoraAssina') && html.includes('credora${i+1}'));
-  assert('.sign-anchor no CSS',     html.includes('.sign-anchor'));
-  assert('sign-anchor color:#fff',  html.includes('sign-anchor') && html.includes('#fff'));
+  // As ancoras <<devedor1>>/<<credora1>> existiam para a ZapSign posicionar a
+  // assinatura. Invisiveis na tela (branco sobre branco), mas presentes na
+  // camada de texto: apareciam ao copiar o conteudo ou extrair o texto do PDF.
+  // Sem a integracao, eram residuo dentro de um instrumento juridico.
+  assert('nenhuma ancora de devedor no gerador do documento', !html.includes('<<devedor'));
+  assert('nenhuma ancora de credora no gerador do documento', !html.includes('<<credora'));
+  assert('a classe .sign-anchor sumiu do CSS',                !html.includes('sign-anchor'));
+  assert('sign() nao recebe mais parametro de ancora',
+    /const sign=\(nome,papel\)=>/.test(html));
 }
 
-// ── [13] ────────────────────────────────────────────────────────────────────────
-grupo('[13] buildDoc: nenhuma âncora em modo físico nem para credora não-signatária');
+grupo('[13] O fecho e as assinaturas continuam inteiros');
 {
-  // Em modo físico, modoElet=false → nem credora nem devedor recebem âncora
-  assert('devedor só recebe âncora se modoElet é true',
-    html.includes('modoElet?`<<devedor'));
-  // Credora só recebe âncora se credoraAssina (que exige modoElet && op_credora_assina)
-  assert('credora só recebe âncora se credoraAssina é true',
-    html.includes('credoraAssina?`<<credora'));
-  // Confirmar que `null` é passado quando a condição é falsa (sem âncora)
-  assert('null passado quando sem âncora',
-    html.includes(':null)'));
+  // Tirar a ancora nao pode ter levado junto o bloco de assinaturas
+  assert('bloco de assinaturas ainda e montado', html.includes('<div class="assinaturas">'));
+  assert('credoras assinam',  html.includes("sign(c.nome,'Credora'"));
+  assert('devedores assinam', html.includes("sign(d.nome,'Devedor(a)'"));
+  assert('a linha de assinatura permanece', html.includes('<div class="line"></div>'));
 }
 
 // ── [14] ────────────────────────────────────────────────────────────────────────
