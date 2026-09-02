@@ -7,7 +7,7 @@
  * api/cron/_email_<nome>.js com a mesma interface { send, verificar }.
  *
  * Interface exportada:
- *   send({ to, subject, text, html?, replyTo? }) → Promise<{ messageId }>
+ *   send({ to, subject, text, html?, replyTo?, attachments? }) → Promise<{ messageId }>
  *   verificar()                                  → Promise<void>
  */
 const provider = process.env.EMAIL_PROVIDER || 'gmail';

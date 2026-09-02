@@ -39,7 +39,7 @@ function _getTransporter() {
  * @param {{ to: string, subject: string, text: string, html?: string, replyTo?: string }} opts
  * @returns {Promise<{ messageId: string }>}
  */
-async function send({ to, subject, text, html, replyTo }) {
+async function send({ to, subject, text, html, replyTo, attachments }) {
   const from  = process.env.EMAIL_FROM || process.env.SMTP_USER;
   const reply = replyTo || from;
   const info  = await _getTransporter().sendMail({

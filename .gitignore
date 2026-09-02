@@ -13,3 +13,4 @@ zippy-elf-*.json
 *.key
 
 .env.production
+backups/

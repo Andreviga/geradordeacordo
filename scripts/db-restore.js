@@ -35,14 +35,33 @@ ${C.b}Uso:${C.x} npm run db:restore -- <arquivo.json.gz> [--dry-run] [--sim] [--
   --dry-run        ensaio completo com ROLLBACK no fim (nada e gravado)
   --sim            pula a confirmacao digitada
   --tabela=nome    restaura so essa tabela (repetivel)
+  --senha=...      senha do backup cifrado (o que chega por e-mail)
 `);
   process.exit(1);
 }
 
 // ── Leitura do dump ───────────────────────────────────────────────────────────
-function lerDump(caminho) {
+function lerDump(caminho, senha) {
   if (!fs.existsSync(caminho)) uso(`Arquivo nao encontrado: ${caminho}`);
-  const bruto = fs.readFileSync(caminho);
+  let bruto = fs.readFileSync(caminho);
+
+  // Backup enviado por e-mail vem cifrado (AES-256-GCM). Detectado pela
+  // assinatura no inicio do arquivo, nao pela extensao.
+  const { estaCifrado, decifrar } = require('../api/cron/_backup_cripto');
+  let cifrado = false;
+  if (estaCifrado(bruto)) {
+    cifrado = true;
+    const chave = senha || process.env.BACKUP_SENHA;
+    if (!chave)
+      uso(`"${path.basename(caminho)}" esta cifrado. Informe a senha com --senha=... `
+        + '(ou defina BACKUP_SENHA no ambiente). E a mesma BACKUP_SENHA do servidor.');
+    try {
+      bruto = decifrar(bruto, chave);
+    } catch (e) {
+      uso(e.message);
+    }
+  }
+
   // Detecta gzip pelos bytes magicos, nao pela extensao
   const ehGzip = bruto.length > 2 && bruto[0] === 0x1f && bruto[1] === 0x8b;
   let texto;
@@ -55,7 +74,7 @@ function lerDump(caminho) {
   try { dump = JSON.parse(texto); } catch (e) { uso(`JSON invalido: ${e.message}`); }
   if (!dump || typeof dump.dados !== 'object' || dump.dados === null)
     uso('Estrutura inesperada: falta a chave "dados". Este arquivo e um backup deste sistema?');
-  return { dump, ehGzip, bytes: bruto.length };
+  return { dump, ehGzip, cifrado, bytes: fs.statSync(caminho).size };
 }
 
 // Postgres aceita no maximo 65535 parametros por comando — daí o lote por colunas
@@ -182,15 +201,18 @@ async function main() {
   const dryRun    = argv.includes('--dry-run');
   const semPerg   = argv.includes('--sim');
   const soTabelas = argv.filter(a => a.startsWith('--tabela=')).map(a => a.slice(9));
+  const argSenha  = argv.find(a => a.startsWith('--senha='));
+  const senha     = argSenha ? argSenha.slice(8) : undefined;
 
   if (!arquivo) uso('Informe o arquivo de backup.');
 
-  const { dump, ehGzip, bytes } = lerDump(arquivo);
+  const { dump, ehGzip, cifrado, bytes } = lerDump(arquivo, senha);
   const geradoEm = dump._meta && dump._meta.gerado_em;
 
   console.log(`\n${C.b}db:restore${C.x}`);
   console.log('─'.repeat(62));
-  console.log(`  Arquivo : ${path.basename(arquivo)} (${(bytes / 1024).toFixed(1)} KB${ehGzip ? ', gzip' : ''})`);
+  console.log(`  Arquivo : ${path.basename(arquivo)} (${(bytes / 1024).toFixed(1)} KB`
+            + `${cifrado ? ', cifrado' : ''}${ehGzip ? ', gzip' : ''})`);
   console.log(`  Gerado  : ${geradoEm ? new Date(geradoEm).toLocaleString('pt-BR') : C.y + 'sem _meta.gerado_em' + C.x}`);
 
   let ordem = ordemDeRestauracao(dump, TABELAS);

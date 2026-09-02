@@ -87,7 +87,9 @@ grupo('[2] As que derrubam funcionalidade inteira são checadas de verdade');
     ['DATABASE_URL',           'sem banco não há sistema'],
     ['JWT_SECRET',             'ninguém consegue entrar'],
     ['CRON_SECRET',            'lembretes e backup respondem 401 e nunca rodam'],
-    ['DRIVE_BACKUP_FOLDER_ID', 'o backup semanal falha a cada execução'],
+    ['DRIVE_BACKUP_FOLDER_ID', 'é um dos dois destinos possíveis do backup'],
+    ['BACKUP_EMAIL',           'é o outro destino, o que funciona sem Workspace'],
+    ['BACKUP_SENHA',           'sem ela o backup por e-mail é recusado'],
   ];
   for (const [nome, porque] of criticas) {
     assert(`${nome} está no inventário do /api/health — ${porque}`,
@@ -98,17 +100,21 @@ grupo('[2] As que derrubam funcionalidade inteira são checadas de verdade');
 
   // Faltar não pode ser só informativo: tem de derrubar o ok do health
   const src = semComentarios(fs.readFileSync(path.join(raiz, 'api/health.js'), 'utf8'));
-  assert('faltar DRIVE_BACKUP_FOLDER_ID marca o health como não-ok',
-    /!resultado\.vars\.DRIVE_BACKUP_FOLDER_ID[\s\S]{0,200}resultado\.ok\s*=\s*false/.test(src));
+  assert('backup sem nenhum destino marca o health como não-ok',
+    /!temDrive\s*&&\s*!temEmail[\s\S]{0,200}resultado\.ok\s*=\s*false/.test(src));
+  assert('e-mail sem senha marca o health como não-ok',
+    /temEmail\s*&&\s*!resultado\.vars\.BACKUP_SENHA[\s\S]{0,200}resultado\.ok\s*=\s*false/.test(src));
   assert('faltar CRON_SECRET marca o health como não-ok',
     /!resultado\.vars\.CRON_SECRET[\s\S]{0,200}resultado\.ok\s*=\s*false/.test(src));
 }
 
-grupo('[3] O backup declara a pasta que ele mesmo exige');
+grupo('[3] O backup exige ao menos um destino');
 {
   const motor = fs.readFileSync(path.join(raiz, 'api/cron/_backup_engine.js'), 'utf8');
-  assert('o motor de backup lança sem DRIVE_BACKUP_FOLDER_ID',
-    /DRIVE_BACKUP_FOLDER_ID[\s\S]{0,120}throw/.test(motor));
+  assert('o motor lança quando não há Drive nem e-mail',
+    /!usarDrive\s*&&\s*!usarEmail[\s\S]{0,200}throw/.test(motor));
+  assert('o envio por e-mail lança sem BACKUP_SENHA',
+    /BACKUP_SENHA[\s\S]{0,80}\n\s*if \(!senha\)|!senha\)[\s\S]{0,200}BACKUP_SENHA/.test(motor));
 }
 
 grupo('[4] As falhas de Drive dizem o que fazer, não só o código HTTP');

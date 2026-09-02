@@ -11,12 +11,12 @@ Sistema de geração e gestão de Termos de Confissão de Dívida com banco de d
 │   ├── acordos/                ← CRUD de acordos (catch-all)
 │   ├── parcelas/               ← baixar / estornar parcelas
 │   ├── cron/                   ← lembretes (D-3/D+1/D+7/D+15) e backup semanal
-│   ├── login.js, dashboard.js, vencidas.js, health.js
+│   ├── login.js, painel.js, usuarios.js, health.js
 │   ├── solicitar-reset.js, confirmar-reset.js
 │   └── assinatura/             ← prepara o documento para assinatura no gov.br
 ├── db/schema.sql               ← schema PostgreSQL (idempotente)
 ├── scripts/                    ← scripts CLI de operação
-├── tests/                      ← testes unitários (437 assertions)
+├── tests/                      ← testes unitários (662 asserções)
 ├── tests/e2e/                  ← testes Playwright
 ├── vercel.json
 └── README.md
@@ -25,6 +25,44 @@ Sistema de geração e gestão de Termos de Confissão de Dívida com banco de d
 ---
 
 ## Backup e Restore
+
+O backup tem **dois destinos possíveis**, e os dois podem ficar ligados ao mesmo tempo.
+Basta um estar configurado; sem nenhum, o cron falha alto dizendo o que falta.
+
+| Destino | Ligado por | Quando usar |
+|---|---|---|
+| **E-mail** | `BACKUP_EMAIL` + `BACKUP_SENHA` | funciona em qualquer conta Google |
+| **Drive** | `DRIVE_BACKUP_FOLDER_ID` + service account | exige **Drive Compartilhado** |
+
+### Por que o Drive nem sempre serve
+
+Service account **não tem cota de armazenamento** — zero, por definição. Um arquivo que
+ela cria numa pasta do "Meu Drive" fica sob a cota dela, e o upload falha com
+`Service Accounts do not have storage quota`. Compartilhar a pasta resolve o acesso,
+mas não muda quem seria o dono do arquivo.
+
+Em **Drive Compartilhado** os arquivos pertencem ao drive, não a quem os criou — aí
+funciona. Só que Drive Compartilhado exige Google Workspace **Business Standard ou
+superior**; o Business Starter não inclui.
+
+Sem isso, use o destino por e-mail.
+
+### Backup por e-mail
+
+```
+BACKUP_EMAIL=secretaria@colegio.com.br
+BACKUP_SENHA=<gere com: node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))">
+```
+
+O anexo vai **sempre cifrado** (AES-256-GCM, chave derivada por scrypt, sal aleatório
+por arquivo). Isso não é opcional e o envio é recusado sem `BACKUP_SENHA`: o arquivo
+leva a base inteira — CPF, RG, endereço e telefone de responsáveis, e nome de menores.
+Mandar isso em claro toda semana trocaria "não ter backup" por "vazar a base se a caixa
+for comprometida".
+
+> ⚠️ **Guarde a `BACKUP_SENHA` fora do Vercel também.** Sem ela o arquivo não é
+> recuperável — não existe porta dos fundos, é o ponto de cifrar. Se você perder o
+> acesso ao painel e a senha ao mesmo tempo, os backups viram lixo.
 
 ### Backup automático
 
@@ -35,22 +73,42 @@ O cron `/api/cron/backup` roda toda segunda-feira às 06h UTC (03h BRT).
 > para `/api/cron?job=:job`. Foram fundidos para caber no limite de 12 funções
 > serverless do plano Hobby. As URLs não mudaram.
 
-- **Semanal**: `backup-weekly-YYYY-WW.json.gz` — retém as 4 últimas semanas.
-- **Mensal**: `backup-monthly-YYYY-MM.json.gz` (gerado na primeira segunda do mês) — retém os 12 últimos meses.
-- **Destino**: pasta `DRIVE_BACKUP_FOLDER_ID` no Drive Compartilhado (mesma service account dos PDFs).
-- **Formato**: JSON comprimido (zlib/gzip). Contém todas as tabelas na ordem correta de FK.
+- **Semanal**: `backup-weekly-YYYY-WW.json.gz` — no Drive, retém as 4 últimas semanas.
+- **Mensal**: `backup-monthly-YYYY-MM.json.gz` (primeira segunda do mês) — retém 12 meses.
+- **Formato**: JSON comprimido (zlib/gzip), todas as tabelas na ordem correta de FK.
+- No e-mail não há rotação: a caixa guarda o histórico que você quiser.
 
-Para rodar um backup manual de emergência:
+Para rodar um backup imediato:
 ```bash
 npm run cron:backup
 ```
+
+### Backup manual, para a sua máquina
+
+```bash
+npm run backup:baixar                     # ./backups/backup-manual-<data>.json.gz
+npm run backup:baixar -- --cifrar         # cifra com BACKUP_SENHA
+npm run backup:baixar -- --dir=D:/copias  # outra pasta
+```
+
+O cron manda o arquivo para fora; este comando traz uma cópia para perto, sem passar
+por terceiro nenhum. É o que se roda **antes de uma operação de risco**: migração de
+schema, expurgo de retenção, restore.
+
+Sai no mesmo formato do cron, então o `db:restore` lê os dois. A pasta `backups/` está
+no `.gitignore`.
+
+> Sem `--cifrar` o arquivo fica em claro na sua máquina, com todos os dados pessoais.
+> Numa pasta sincronizada (OneDrive, Dropbox) isso significa mandar a base para a nuvem
+> do fornecedor. Prefira `--cifrar`, ou uma pasta fora da sincronização.
+
 
 ### Restore — procedimento exato
 
 #### Pré-requisitos
 - Node.js 18+
 - `DATABASE_URL` apontando para o banco de destino (use `.env.local`)
-- Arquivo `.json.gz` do backup (baixado do Drive)
+- Arquivo do backup: o `.json.gz` do Drive, ou o `.json.gz.enc` que chega por e-mail
 
 Não é preciso descompactar: o script detecta gzip pelos bytes do arquivo.
 
@@ -111,6 +169,7 @@ npm run db:restore -- backup-weekly-2026-W31.json.gz --tabela=acordos
 | `--dry-run` | ensaio completo com `ROLLBACK` no fim |
 | `--sim` | pula a confirmação digitada (automação) |
 | `--tabela=<nome>` | restaura só essa tabela; pode repetir |
+| `--senha=<senha>` | senha do backup cifrado (o que chega por e-mail) |
 
 ### Restore de teste trimestral
 
