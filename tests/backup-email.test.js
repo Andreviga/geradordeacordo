@@ -171,6 +171,50 @@ async function main() {
     await db.close();
   }
 
+  // ── [5] Um destino que falha não anula o que deu certo ───────────────────
+  grupo('[5] Destinos são independentes');
+  {
+    const { executarBackup } = require('../api/cron/_backup_engine');
+    const poolFake = { query: async () => ({ rows: [] }) };
+
+    // Chave inválida: obterToken falha ao assinar, sem precisar de rede
+    const saQuebrada = JSON.stringify({
+      client_email: 'x@y.iam.gserviceaccount.com',
+      private_key: '-----BEGIN PRIVATE KEY-----\nnao-e-uma-chave\n-----END PRIVATE KEY-----\n',
+    });
+
+    const caminhoAdapter = require.resolve('../api/cron/_emailAdapter');
+    let enviou = 0;
+    require.cache[caminhoAdapter].exports = {
+      send: async () => { enviou++; return { messageId: 'fake' }; },
+      verificar: async () => {},
+    };
+
+    process.env.BACKUP_EMAIL = 'secretaria@exemplo.invalido';
+    process.env.BACKUP_SENHA = SENHA;
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON = saQuebrada;
+    process.env.DRIVE_BACKUP_FOLDER_ID = 'pasta-qualquer';
+
+    const r = await executarBackup(poolFake);
+    assert('e-mail deu certo, Drive falhou → não lança', r.ok === true);
+    assert('o e-mail foi enviado uma vez', enviou === 1);
+    assert('o sucesso do e-mail é registrado', r.uploads.some(u => u.tipo === 'email'));
+    assert('a falha do Drive é registrada, não engolida',
+      r.falhas && r.falhas.length === 1 && r.falhas[0].destino === 'drive');
+
+    // Agora os dois falham: aí sim é erro, porque não existe cópia nenhuma
+    delete process.env.BACKUP_SENHA;   // derruba o e-mail
+    let erro = null;
+    try { await executarBackup(poolFake); } catch (e) { erro = e; }
+    assert('nenhum destino funcionando → lança', erro !== null);
+    assert('o erro diz que nada foi salvo', erro && /nenhum destino/i.test(erro.message));
+    assert('o erro lista as duas causas', erro && erro.falhas && erro.falhas.length === 2);
+
+    process.env.BACKUP_SENHA = SENHA;
+    delete process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    delete process.env.DRIVE_BACKUP_FOLDER_ID;
+  }
+
   console.log(`\nResultado: ${passou} ✓  ${falhou} ✗`);
   if (falhou > 0) process.exit(1);
 }
