@@ -235,13 +235,23 @@ function checkEnvVars() {
 
   check('GOOGLE_SERVICE_ACCOUNT_JSON', false, 'Necessário para o backup semanal e o PDF no Drive');
   check('DRIVE_PDF_FOLDER_ID', false, 'Pasta de destino do PDF na importação retroativa');
-  // Sem esta, executarBackup() lança antes de ler o banco: o backup semanal
-  // falha toda segunda, e só aparece no log do Vercel.
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON && !process.env.DRIVE_BACKUP_FOLDER_ID)
-    FAIL('DRIVE_BACKUP_FOLDER_ID ausente — o backup semanal falha a cada execução',
-      'Crie a pasta no Drive Compartilhado, compartilhe com a service account e copie o ID da URL');
-  else
-    check('DRIVE_BACKUP_FOLDER_ID', false, 'Pasta de destino dos backups semanais');
+  // O backup precisa de ao menos um destino. Sem nenhum, executarBackup() lança
+  // antes de ler o banco: falha toda segunda, e só aparece no log do Vercel.
+  const temDrive = !!(process.env.GOOGLE_SERVICE_ACCOUNT_JSON && process.env.DRIVE_BACKUP_FOLDER_ID);
+  const temEmail = !!(process.env.BACKUP_EMAIL || '').trim();
+
+  check('DRIVE_BACKUP_FOLDER_ID', false, 'Destino no Drive — exige Drive COMPARTILHADO');
+  check('BACKUP_EMAIL',           false, 'Destino por e-mail — funciona sem Workspace');
+
+  if (!temDrive && !temEmail)
+    FAIL('Backup sem destino — falha a cada execução',
+      'Configure BACKUP_EMAIL (com BACKUP_SENHA) ou DRIVE_BACKUP_FOLDER_ID');
+  if (temEmail && !process.env.BACKUP_SENHA)
+    FAIL('BACKUP_EMAIL definida sem BACKUP_SENHA — o envio é recusado',
+      'O anexo leva a base inteira e só sai cifrado. Gere com: '
+      + 'node -e "console.log(require(\'crypto\').randomBytes(24).toString(\'base64url\'))"');
+  else if (temEmail)
+    OK('BACKUP_SENHA configurada — anexo do backup vai cifrado');
 
   check('EMAIL_FROM',               false, 'Remetente dos lembretes');
   check('CONTATO_SECRETARIA_EMAIL', false, 'Aparece no corpo do lembrete e no replyTo');

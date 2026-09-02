@@ -132,15 +132,9 @@ function isPrimeiraMondayDoMes(data) {
   return data.getUTCDay() === 1 && data.getUTCDate() <= 7;
 }
 
-// ─── Executor ─────────────────────────────────────────────────────────────────
-async function executarBackup(pool) {
-  const creds = parseCredenciais();
-  if (!creds) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON não configurado');
-
-  const pastaId = process.env.DRIVE_BACKUP_FOLDER_ID;
-  if (!pastaId) throw new Error('DRIVE_BACKUP_FOLDER_ID não configurado');
-
-  // 1. Dump de todas as tabelas
+// ─── Dump ─────────────────────────────────────────────────────────────────────
+/** Lê o banco inteiro e devolve o .json.gz. Sem destino — quem envia é quem chama. */
+async function montarDump(pool) {
   const dump = { _meta: { gerado_em: new Date().toISOString(), tabelas: TABELAS }, dados: {} };
   let totalLinhas = 0;
   for (const tabela of TABELAS) {
@@ -148,14 +142,81 @@ async function executarBackup(pool) {
     dump.dados[tabela] = rows;
     totalLinhas += rows.length;
   }
-
-  // 2. Serializar e comprimir
   const json    = JSON.stringify(dump);
   const bufGzip = await new Promise((ok, err) => zlib.gzip(Buffer.from(json), (e, b) => e ? err(e) : ok(b)));
+  return { dump, bufGzip, totalLinhas };
+}
 
+// ─── Destino: e-mail ──────────────────────────────────────────────────────────
+// Existe porque service account não tem cota de armazenamento: sem um Drive
+// Compartilhado (que exige Workspace Business Standard), ela não consegue gravar
+// arquivo nenhum. O e-mail reaproveita o SMTP que já funciona para os lembretes.
+async function enviarPorEmail(bufGzip, nomeArquivo, totalLinhas) {
+  const para  = (process.env.BACKUP_EMAIL || '').trim();
+  const senha = process.env.BACKUP_SENHA;
+
+  // Cifrar não é opcional aqui. O anexo é a base inteira: CPF, RG, endereço e
+  // telefone de responsáveis, e nome de menores. Mandar em claro, toda semana,
+  // trocaria "não ter backup" por "vazar a base se a caixa for comprometida".
+  if (!senha)
+    throw new Error(
+      'BACKUP_SENHA não configurada. O backup por e-mail leva a base inteira em anexo '
+      + '(CPF, endereços, dados de menores) e por isso só é enviado cifrado. '
+      + 'Defina BACKUP_SENHA no Vercel e guarde-a fora de lá — sem ela o backup não é recuperável.');
+
+  const { cifrar } = require('./_backup_cripto');
+  const anexo = cifrar(bufGzip, senha);
+  const nome  = `${nomeArquivo}.enc`;
+
+  const adapter = require('./_emailAdapter');
+  await adapter.send({
+    to: para,
+    subject: `Backup do Gerador de Acordo — ${nomeArquivo}`,
+    text: [
+      'Backup automático da base do Gerador de Acordo.',
+      '',
+      `Arquivo : ${nome}`,
+      `Linhas  : ${totalLinhas}`,
+      `Tamanho : ${(anexo.length / 1024).toFixed(1)} KB`,
+      '',
+      'O anexo está CIFRADO (AES-256-GCM) com a BACKUP_SENHA configurada no servidor.',
+      'Para restaurar:  npm run db:restore -- <arquivo> --senha=SUA_SENHA',
+      '',
+      'Guarde este e-mail. Sem a senha, o arquivo não é recuperável.',
+    ].join('\n'),
+    attachments: [{ filename: nome, content: anexo }],
+  });
+
+  console.log(`[backup] e-mail enviado para ${para}: ${nome} (${anexo.length} bytes)`);
+  return { tipo: 'email', nome, tamanho: anexo.length, para };
+}
+
+// ─── Executor ─────────────────────────────────────────────────────────────────
+async function executarBackup(pool) {
+  const creds     = parseCredenciais();
+  const pastaId   = process.env.DRIVE_BACKUP_FOLDER_ID;
+  const usarDrive = !!(creds && pastaId);
+  const usarEmail = !!(process.env.BACKUP_EMAIL || '').trim();
+
+  if (!usarDrive && !usarEmail)
+    throw new Error(
+      'Nenhum destino de backup configurado. Defina DRIVE_BACKUP_FOLDER_ID (com '
+      + 'GOOGLE_SERVICE_ACCOUNT_JSON) para gravar no Drive, ou BACKUP_EMAIL para receber '
+      + 'o arquivo cifrado por e-mail. Os dois juntos também funcionam.');
+
+  const { bufGzip, totalLinhas } = await montarDump(pool);
   const agora   = new Date();
-  const token   = await obterToken(creds);
   const uploads = [];
+
+  // O e-mail vai primeiro: não depende de rede do Google e é o destino que
+  // sobra quando o Drive falha. Assim uma falha no Drive não impede o off-site.
+  if (usarEmail) {
+    uploads.push(await enviarPorEmail(bufGzip, `backup-weekly-${isoWeek(agora)}.json.gz`, totalLinhas));
+  }
+
+  if (!usarDrive) return { ok: true, totalLinhas, uploads };
+
+  const token = await obterToken(creds);
 
   // 3. Upload semanal + retenção (4 semanas)
   const nomeW = `backup-weekly-${isoWeek(agora)}.json.gz`;
@@ -187,4 +248,4 @@ async function executarBackup(pool) {
   return { ok: true, totalLinhas, uploads };
 }
 
-module.exports = { executarBackup, TABELAS, explicarErroDrive };
+module.exports = { executarBackup, montarDump, enviarPorEmail, TABELAS, explicarErroDrive };

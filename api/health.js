@@ -48,6 +48,8 @@ module.exports = async (req, res) => {
     GOOGLE_DRIVE:   !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
     DRIVE_FOLDER:   !!process.env.DRIVE_PDF_FOLDER_ID,
     DRIVE_BACKUP_FOLDER_ID: !!process.env.DRIVE_BACKUP_FOLDER_ID,
+    BACKUP_EMAIL:   !!process.env.BACKUP_EMAIL,
+    BACKUP_SENHA:   !!process.env.BACKUP_SENHA,
     SMTP:           !!(process.env.SMTP_USER && process.env.SMTP_PASS),
     EMAIL_FROM:     !!process.env.EMAIL_FROM,
     EMAIL_PROVIDER: process.env.EMAIL_PROVIDER || '(padrão)',
@@ -66,12 +68,21 @@ module.exports = async (req, res) => {
   if (!resultado.vars.JWT_SECRET || !resultado.vars.DATABASE_URL)
     resultado.ok = false;
 
-  // O backup semanal aborta sem a pasta de destino. Falha silenciosa: o cron
-  // levanta, erra e ninguém fica sabendo — então o health precisa gritar.
-  if (resultado.vars.GOOGLE_DRIVE && !resultado.vars.DRIVE_BACKUP_FOLDER_ID) {
+  // O backup precisa de ao menos um destino. Falha silenciosa: o cron levanta,
+  // erra e ninguém fica sabendo — então o health precisa gritar.
+  const temDrive = resultado.vars.GOOGLE_DRIVE && resultado.vars.DRIVE_BACKUP_FOLDER_ID;
+  const temEmail = resultado.vars.BACKUP_EMAIL;
+  if (!temDrive && !temEmail) {
     resultado.ok = false;
     resultado.avisos = [...(resultado.avisos || []),
-      'DRIVE_BACKUP_FOLDER_ID ausente — o backup semanal falha a cada execução.'];
+      'Backup sem destino: configure BACKUP_EMAIL (com BACKUP_SENHA) ou DRIVE_BACKUP_FOLDER_ID. '
+      + 'Como está, o backup semanal falha a cada execução.'];
+  }
+  // Cifrar é obrigatório no e-mail: o anexo é a base inteira
+  if (temEmail && !resultado.vars.BACKUP_SENHA) {
+    resultado.ok = false;
+    resultado.avisos = [...(resultado.avisos || []),
+      'BACKUP_EMAIL definida sem BACKUP_SENHA — o envio é recusado, porque o anexo só sai cifrado.'];
   }
   if (!resultado.vars.CRON_SECRET) {
     resultado.ok = false;
