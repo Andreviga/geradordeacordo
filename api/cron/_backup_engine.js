@@ -207,45 +207,75 @@ async function executarBackup(pool) {
   const { bufGzip, totalLinhas } = await montarDump(pool);
   const agora   = new Date();
   const uploads = [];
+  const falhas  = [];
 
-  // O e-mail vai primeiro: não depende de rede do Google e é o destino que
-  // sobra quando o Drive falha. Assim uma falha no Drive não impede o off-site.
-  if (usarEmail) {
-    uploads.push(await enviarPorEmail(bufGzip, `backup-weekly-${isoWeek(agora)}.json.gz`, totalLinhas));
-  }
-
-  if (!usarDrive) return { ok: true, totalLinhas, uploads };
-
-  const token = await obterToken(creds);
-
-  // 3. Upload semanal + retenção (4 semanas)
-  const nomeW = `backup-weekly-${isoWeek(agora)}.json.gz`;
-  const fw    = await uploadGzip(token, nomeW, bufGzip, pastaId, creds.client_email);
-  uploads.push({ tipo: 'weekly', nome: fw.name, tamanho: fw.size });
-  console.log(`[backup] semanal: ${fw.name} (${fw.size} bytes)`);
-
-  const semanais = await listarArquivosPorPrefixo(token, 'backup-weekly-', pastaId);
-  for (const f of semanais.slice(0, Math.max(0, semanais.length - 4))) {
-    await deletarArquivo(token, f.id);
-    console.log(`[backup] removido semanal antigo: ${f.name}`);
-  }
-
-  // 4. Upload mensal (primeira segunda do mês) + retenção (12 meses)
-  if (isPrimeiraMondayDoMes(agora)) {
-    const mes   = agora.toISOString().slice(0, 7);
-    const nomeM = `backup-monthly-${mes}.json.gz`;
-    const fm    = await uploadGzip(token, nomeM, bufGzip, pastaId, creds.client_email);
-    uploads.push({ tipo: 'monthly', nome: fm.name, tamanho: fm.size });
-    console.log(`[backup] mensal: ${fm.name} (${fm.size} bytes)`);
-
-    const mensais = await listarArquivosPorPrefixo(token, 'backup-monthly-', pastaId);
-    for (const f of mensais.slice(0, Math.max(0, mensais.length - 12))) {
-      await deletarArquivo(token, f.id);
-      console.log(`[backup] removido mensal antigo: ${f.name}`);
+  // Cada destino é independente: um que falhe não pode anular o que já deu
+  // certo. Aconteceu na primeira execução real — o e-mail saiu, o Drive falhou
+  // por cota, e mesmo assim o cron reportou erro, como se nada tivesse sido
+  // salvo. Numa retentativa o e-mail seria enviado de novo, sem necessidade.
+  async function tentar(nome, fn) {
+    try {
+      await fn();
+    } catch (err) {
+      falhas.push({ destino: nome, erro: err.message });
+      console.error(`[backup] destino "${nome}" falhou: ${err.message}`);
     }
   }
 
-  return { ok: true, totalLinhas, uploads };
+  // O e-mail vai primeiro: não depende da rede do Google e é o destino que
+  // sobra quando o Drive não está disponível.
+  if (usarEmail) {
+    await tentar('email', async () => {
+      uploads.push(await enviarPorEmail(bufGzip, `backup-weekly-${isoWeek(agora)}.json.gz`, totalLinhas));
+    });
+  }
+
+  if (usarDrive) {
+    await tentar('drive', async () => {
+      const token = await obterToken(creds);
+
+      // Upload semanal + retenção (4 semanas)
+      const nomeW = `backup-weekly-${isoWeek(agora)}.json.gz`;
+      const fw    = await uploadGzip(token, nomeW, bufGzip, pastaId, creds.client_email);
+      uploads.push({ tipo: 'weekly', nome: fw.name, tamanho: fw.size });
+      console.log(`[backup] semanal: ${fw.name} (${fw.size} bytes)`);
+
+      const semanais = await listarArquivosPorPrefixo(token, 'backup-weekly-', pastaId);
+      for (const f of semanais.slice(0, Math.max(0, semanais.length - 4))) {
+        await deletarArquivo(token, f.id);
+        console.log(`[backup] removido semanal antigo: ${f.name}`);
+      }
+
+      // Upload mensal (primeira segunda do mês) + retenção (12 meses)
+      if (isPrimeiraMondayDoMes(agora)) {
+        const mes   = agora.toISOString().slice(0, 7);
+        const nomeM = `backup-monthly-${mes}.json.gz`;
+        const fm    = await uploadGzip(token, nomeM, bufGzip, pastaId, creds.client_email);
+        uploads.push({ tipo: 'monthly', nome: fm.name, tamanho: fm.size });
+        console.log(`[backup] mensal: ${fm.name} (${fm.size} bytes)`);
+
+        const mensais = await listarArquivosPorPrefixo(token, 'backup-monthly-', pastaId);
+        for (const f of mensais.slice(0, Math.max(0, mensais.length - 12))) {
+          await deletarArquivo(token, f.id);
+          console.log(`[backup] removido mensal antigo: ${f.name}`);
+        }
+      }
+    });
+  }
+
+  // Só é erro quando NENHUM destino funcionou: aí não existe cópia do backup.
+  if (!uploads.length) {
+    const e = new Error('Backup não foi salvo em nenhum destino. '
+      + falhas.map(f => `${f.destino}: ${f.erro}`).join(' | '));
+    e.falhas = falhas;
+    throw e;
+  }
+
+  if (falhas.length)
+    console.warn(`[backup] concluído com ${falhas.length} destino(s) em falha, `
+      + `mas o backup está salvo em: ${uploads.map(u => u.tipo).join(', ')}`);
+
+  return { ok: true, totalLinhas, uploads, ...(falhas.length ? { falhas } : {}) };
 }
 
 module.exports = { executarBackup, montarDump, enviarPorEmail, TABELAS, explicarErroDrive };
