@@ -27,6 +27,7 @@ async function enviar({ buffer, nomeDocumento, signatarios }) {
       `Documento: "${nomeDocumento}"`,
       `Signatários (em ordem): ${nomes}`,
       `SHA-256 do arquivo original: ${sha256}`,
+      'O "arquivo original" é exatamente o PDF enviado no sistema — o mesmo que gerou o hash acima.',
       '─'.repeat(64),
       'Como assinar via gov.br — leia com atenção:',
       '1. Cada signatário deve ter conta gov.br com nível Prata ou Ouro.',

@@ -965,4 +965,73 @@ test.describe('P2 — verificações empíricas', () => {
       'token vazio fora da lista ainda precisa avisar').toBe(true);
   });
 
+  // ── [D11] O hash da assinatura é o do PDF que vai ser assinado ────────────
+  // enviarAssinatura() gerava o PDF pelo html2canvas — o mesmo que sobrepunha
+  // texto na qualificação. O servidor calculava o SHA-256 desse arquivo e as
+  // instruções mandavam o signatário conferir esse hash no portal, enquanto o
+  // arquivo realmente subido era o do Imprimir/PDF. Os hashes nunca batiam.
+  test('[D11] A assinatura usa o PDF enviado pelo usuário, não um gerado na hora', async ({ page }) => {
+    await autenticarP2(page);
+
+    // PDF mínimo porém real: cabeçalho %PDF- e um corpo qualquer.
+    const pdf = Buffer.concat([
+      Buffer.from('%PDF-1.4\n% termo de teste\n', 'latin1'),
+      Buffer.from(Array.from({ length: 512 }, (_, i) => i % 251)),
+      Buffer.from('\n%%EOF\n', 'latin1'),
+    ]);
+    const shaEsperado = require('crypto').createHash('sha256').update(pdf).digest('hex');
+
+    let corpoEnviado = null;
+    await page.route('/api/assinatura', async route => {
+      let body; try { body = route.request().postDataJSON(); } catch { body = null; }
+      if (body?.action === 'status') {
+        return route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify({ configured: true, provedor: 'manual', features: {} }) });
+      }
+      corpoEnviado = body;
+      const crypto = require('crypto');
+      const sha = crypto.createHash('sha256').update(Buffer.from(body.pdfBase64, 'base64')).digest('hex');
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ id: 'manual-TESTE', status: 'pendente', sha256: sha, instrucoes: ['1. passo'] }) });
+    });
+
+    // A seção de assinatura fica dentro de um <details>; abre para o input de
+    // arquivo ficar acessível ao setInputFiles.
+    const preparado = await page.evaluate(() => {
+      loadExample(); atualizarSignatarios(); render();
+      document.querySelectorAll('details.group').forEach(d => { d.open = true; });
+      const e = document.getElementById('asn_email0');
+      if (e) e.value = 'signatario@exemplo.com.br';
+      return { temCampoEmail: !!e, temInput: !!document.getElementById('ass_pdf') };
+    });
+    expect(preparado.temCampoEmail, 'o campo de e-mail do signatário precisa existir').toBe(true);
+    expect(preparado.temInput, 'o campo de upload do PDF precisa existir').toBe(true);
+
+    // 1) sem arquivo, nada é enviado
+    await page.evaluate(() => enviarAssinatura());
+    expect(corpoEnviado, 'sem PDF, a API não pode ser chamada').toBeNull();
+    const semArquivo = await page.evaluate(() => document.getElementById('ass_status').textContent);
+    expect(semArquivo).toMatch(/Imprimir \/ PDF/);
+
+    // 2) com o arquivo, o que vai à API são exatamente os bytes enviados
+    await page.setInputFiles('#ass_pdf', { name: 'termo.pdf', mimeType: 'application/pdf', buffer: pdf });
+    await expect(page.locator('#ass_pdf_info')).toContainText(shaEsperado, { timeout: 5000 });
+
+    await page.evaluate(() => enviarAssinatura());
+    await expect(page.locator('#ass_result')).toBeVisible({ timeout: 5000 });
+
+    expect(corpoEnviado, 'a API precisa ter sido chamada').not.toBeNull();
+    const recebido = Buffer.from(corpoEnviado.pdfBase64, 'base64');
+    expect(recebido.equals(pdf), 'os bytes enviados têm de ser os do arquivo do usuário').toBe(true);
+    expect(await page.evaluate(() => document.getElementById('ass_result').textContent)).toContain(shaEsperado);
+
+    // 3) um arquivo que não é PDF é recusado antes de qualquer envio
+    corpoEnviado = null;
+    await page.setInputFiles('#ass_pdf', { name: 'termo.docx', mimeType: 'application/octet-stream',
+      buffer: Buffer.from('PK\u0003\u0004 nao sou pdf', 'latin1') });
+    await expect(page.locator('#ass_pdf_info')).toContainText('não é um PDF', { timeout: 5000 });
+    await page.evaluate(() => enviarAssinatura());
+    expect(corpoEnviado, 'arquivo recusado não pode ser enviado').toBeNull();
+  });
+
 });
