@@ -84,6 +84,7 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 .status.erro{background:#fbeeea;border-color:var(--alert);color:#7d3520}
 .status.aviso{background:#fef9ec;border-color:#b8860b;color:#6b4c00}
 .status.expirado{background:#fff3e0;border-color:#e65100;color:#bf4500}
+#avisoClausulas[hidden]{display:none!important}
 
 /* ---------- documento ---------- */
 .page{background:#fff;position:relative;width:100%;max-width:794px;min-height:1123px;padding:0;box-shadow:0 2px 20px rgba(18,32,58,.13);font-family:"Times New Roman",Times,Georgia,serif;font-size:11.5pt;line-height:1.5;color:#000;text-align:justify}
@@ -320,6 +321,13 @@ input[type=range]{width:100%;accent-color:var(--seal)}
     <span id="bancoStatus"></span>
     <button class="btn ghost small" id="btnVerAcordos" onclick="abrirListagem()" style="margin-left:6px;display:none">Ver acordos</button>
   </div>
+  <!-- Aviso que NAO pode sumir nem ficar escondido: texto juridico trocado na
+       restauracao de um rascunho antigo. Fica dentro da barra fixa de proposito —
+       no topo do formulario ele nascia atras dela, invisivel. -->
+  <div class="status aviso" id="avisoClausulas" hidden style="margin:0 10px 8px;flex-basis:100%;display:flex;align-items:center;gap:8px">
+    <span id="avisoClausulasTexto" style="flex:1"></span>
+    <button type="button" class="btn small" onclick="fecharAvisoClausulas()">Entendi</button>
+  </div>
 </header>
 <div class="mobile-tabs" id="mobileTabs" role="tablist" aria-label="Visualização do documento">
   <button class="mobile-tab active" id="tab-form" role="tab" aria-selected="true" aria-controls="form" onclick="switchTab('form')"><span aria-hidden="true">📝</span>&nbsp;Formulário</button>
@@ -329,13 +337,6 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 
 <div class="shell">
 <form class="panel" id="form" oninput="render()" onchange="render()" onsubmit="return false">
-
-  <!-- Aviso que NAO pode sumir sozinho: texto juridico trocado na restauracao
-       de um rascunho antigo. Um toast de 2,8s nao serve para isso. -->
-  <div class="status aviso" id="avisoClausulas" hidden>
-    <span id="avisoClausulasTexto"></span>
-    <button type="button" class="btn small" style="margin-left:8px" onclick="fecharAvisoClausulas()">Entendi</button>
-  </div>
 
   <details class="group" open>
     <summary><span class="num">01</span> Credoras</summary>

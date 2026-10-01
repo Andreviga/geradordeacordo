@@ -884,10 +884,27 @@ test.describe('P2 — verificações empíricas', () => {
       // pelo "Rascunho restaurado." que vem logo depois, e o usuário não via
       // que o texto jurídico havia sido trocado.
       const banner = document.getElementById('avisoClausulas');
-      out.avisoVisivel = !!(banner && !banner.hidden);
       out.avisoTexto = banner ? banner.textContent : '';
+      // `hidden === false` NÃO prova que o usuário vê: na primeira tentativa o
+      // banner nascia no topo do formulário, atrás da barra fixa (banner em
+      // 57–137px, header em 0–144px), e elementFromPoint devolvia o HEADER.
+      // Aqui se verifica quem realmente está desenhado naquele ponto da tela.
+      // A barra é sticky: ela só cobre o que vem depois dela DEPOIS de rolar.
+      // Foi assim que apareceu em produção (shell.top=57, header 0–144) e é a
+      // situação normal de quem está preenchendo o formulário.
+      window.scrollTo(0, 300);
+      await esperar(150);
+      const noTopo = () => {
+        if (!banner || banner.hidden) return 'oculto';
+        const r = banner.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return 'sem área';
+        if (r.top < 0 || r.bottom > innerHeight) return 'fora da viewport';
+        const alvo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return (alvo && banner.contains(alvo)) ? 'visivel' : 'coberto por ' + (alvo ? alvo.tagName + '.' + alvo.className : 'nada');
+      };
+      out.avisoVisivel = noTopo();
       await esperar(3200);   // mais que a vida do toast
-      out.avisoAindaVisivel = !!(banner && !banner.hidden);
+      out.avisoAindaVisivel = noTopo();
       return out;
     });
 
@@ -898,9 +915,9 @@ test.describe('P2 — verificações empíricas', () => {
     expect(r.textoC, 'rascunho atual não deve ser alterado').toBe(r.padrao);
     expect(r.docEletronico, 'fecho eletrônico presente').toBe(true);
     expect(r.docComTestemunhas, 'documento eletrônico não pode exigir 2 testemunhas').toBe(false);
-    expect(r.avisoVisivel, 'o usuário precisa ser avisado da troca de texto').toBe(true);
+    expect(r.avisoVisivel, 'o aviso precisa estar desenhado na tela, não só com hidden=false').toBe('visivel');
     expect(r.avisoTexto).toContain('TÍTULO EXECUTIVO');
-    expect(r.avisoAindaVisivel, 'o aviso não pode desaparecer sozinho').toBe(true);
+    expect(r.avisoAindaVisivel, 'o aviso não pode desaparecer nem ser coberto depois').toBe('visivel');
   });
 
 });
