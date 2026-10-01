@@ -390,6 +390,8 @@ usuário pode ser criado depois pela interface.
 | 2026-10-01 | Cláusulas do corpo (multa moratória, multa penal, juros, cumulação) | ✅ Aprovado |
 | 2026-10-01 | Cláusula de foro de eleição | ✅ Aprovado |
 | 2026-10-01 | Cláusula de confissão de dívida (Primeira, incluindo a renúncia do §1º) | ✅ Aprovado |
+| 2026-10-01 | Cláusula do título executivo extrajudicial, nas duas redações — eletrônica (art. 784, §4º CPC, sem testemunhas) e física (art. 784, III CPC, com duas testemunhas) | ✅ Aprovado |
+| 2026-10-01 | Assinatura eletrônica pelo gov.br como assinatura avançada da Lei 14.063/2020, dispensando ICP-Brasil (REsp 2.205.708-PR) | ✅ Aprovado |
 | Pendente   | Qualificação das partes (blocos CREDORA e DEVEDORES, gerados por `qualCredora()` e `qualDevedor()`) | ⚠ Não revisado |
 
 > A qualificação das partes **não** fazia parte do material submetido em 2026-10-01: a
@@ -410,6 +412,15 @@ Alterações aplicadas nessa rodada:
   é campo livre.
 - **Manutenção da matrícula** — passou a citar também o art. 6º da Lei 9.870/1999, que
   é onde está a vedação a penalidades pedagógicas; o art. 5º trata da renovação.
+- **Rascunhos de versões anteriores** — o autosave do navegador e o arquivo de
+  "Salvar dados" gravam o texto integral das cláusulas. Um rascunho feito antes desta
+  revisão reinstalava a redação revogada ao ser restaurado, sem aviso. Agora cada
+  cláusula é salva com a marca `editado`: a redação escrita à mão pelo usuário é
+  preservada; a que era apenas o padrão de uma versão anterior cede ao texto vigente,
+  e a tela avisa quais cláusulas foram atualizadas. Arquivos salvos antes desta
+  correção não têm a marca e são tratados como não editados — perder uma redação
+  própria e ser avisado é menos grave que assinar um texto revogado sem perceber.
+  Coberto pelo teste `[D9]` em `tests/e2e/smoke.test.js`.
 
 Fundamento confirmado na revisão, para a dispensa de testemunhas no modo eletrônico:
 art. 784, §4º do CPC (Lei 14.620/2023), com assinatura pelo gov.br como assinatura

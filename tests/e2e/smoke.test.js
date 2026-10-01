@@ -818,4 +818,78 @@ test.describe('P2 — verificações empíricas', () => {
     expect(r.erros, `exemplo não pode nascer com erro de exportação:\n${r.erros.join('\n')}`).toHaveLength(0);
   });
 
+  // ── [D9] Rascunho antigo não pode reverter o texto jurídico revisado ──────
+  // O autosave (localStorage) e o "Salvar dados" (.json) gravam o TEXTO INTEGRAL
+  // das cláusulas. Um rascunho feito antes de uma revisão jurídica, ao ser
+  // restaurado, reinstalava a redação revogada sem avisar — na prática, voltava
+  // a cláusula do título executivo exigindo 2 testemunhas enquanto o fecho dizia
+  // "assinado eletronicamente". Verificado no navegador, não por leitura de código.
+  test('[D9] Autosave de versão anterior não reinstala cláusula revogada', async ({ page }) => {
+    await autenticarP2(page);
+
+    const r = await page.evaluate(async () => {
+      const ANTIGO = 'As partes reconhecem que o presente termo, assinado pelos {{DEV}} e por '
+        + '2 (duas) testemunhas, constitui titulo executivo extrajudicial, nos termos do '
+        + 'art. 784, inciso III, do Codigo de Processo Civil.';
+      const esperar = (ms) => new Promise(s => setTimeout(s, ms));
+      const idAlvo = CATALOGO.find(c => /TÍTULO EXECUTIVO/.test(c.titulo)).id;
+      const padrao = CATALOGO.find(c => c.id === idAlvo).texto;
+
+      // Monta um rascunho com o texto antigo na cláusula do título executivo.
+      // `editado` controla se a redação é do usuário ou é só o padrão de antes.
+      const semear = (editado) => {
+        const d = coletarDados();
+        d.clausulas = d.clausulas.map(c => {
+          if (c.id !== idAlvo) return c;
+          const n = { ...c, texto: ANTIGO };
+          if (editado === null) delete n.editado; else n.editado = editado;
+          return n;
+        });
+        clearTimeout(_autosaveTimer);   // senão o timer de 2s sobrescreve a semente
+        localStorage.setItem('ger_autosave', JSON.stringify({ _ts: Date.now() - 864e5, ...d }));
+      };
+      const restaurar = () => {
+        const oc = window.confirm; window.confirm = () => true;
+        const ok = pedirRestauracaoAutosave();
+        window.confirm = oc;
+        return ok;
+      };
+      const textoAtual = () => clausulas.find(c => c.id === idAlvo).texto;
+
+      const out = {};
+      // A — arquivo salvo antes desta correção (sem a marca): vale o texto vigente
+      loadExample(); await esperar(150); semear(null);
+      out.restaurouA = restaurar(); out.textoA = textoAtual();
+      // B — redação própria do usuário: preservada
+      loadExample(); await esperar(150); semear(true);
+      restaurar(); out.textoB = textoAtual();
+      // C — rascunho de hoje, sem edição: nada muda
+      loadExample(); await esperar(150);
+      clearTimeout(_autosaveTimer);
+      localStorage.setItem('ger_autosave', JSON.stringify({ _ts: Date.now(), ...coletarDados() }));
+      restaurar(); out.textoC = textoAtual();
+
+      out.padrao = padrao;
+      out.antigo = ANTIGO;
+      // O documento renderizado depois do caso A não pode falar de testemunhas
+      // quando a assinatura eletrônica está marcada.
+      loadExample(); await esperar(150); semear(null); restaurar();
+      const cb = document.getElementById('op_assinatura_eletronica');
+      if (cb) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+      render(); await esperar(200);
+      const doc = document.body.innerText;
+      out.docComTestemunhas = /por 2 \(duas\) testemunhas/.test(doc);
+      out.docEletronico = /assinado eletronicamente/.test(doc);
+      return out;
+    });
+
+    expect(r.restaurouA, 'a restauração precisa acontecer de fato').toBe(true);
+    expect(r.textoA, 'rascunho sem marca de edição deve ceder ao texto vigente').toBe(r.padrao);
+    expect(r.textoA).not.toBe(r.antigo);
+    expect(r.textoB, 'redação escrita pelo usuário deve ser preservada').toBe(r.antigo);
+    expect(r.textoC, 'rascunho atual não deve ser alterado').toBe(r.padrao);
+    expect(r.docEletronico, 'fecho eletrônico presente').toBe(true);
+    expect(r.docComTestemunhas, 'documento eletrônico não pode exigir 2 testemunhas').toBe(false);
+  });
+
 });

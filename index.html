@@ -1857,8 +1857,22 @@ function abrirNovaAba(){
   toast('Aberto em nova aba — use Ctrl+P para salvar em PDF.');
 }
 function copiar(t){ try{navigator.clipboard.writeText(t); toast(t+' copiado');}catch(e){} }
+// Texto oficial de uma cláusula, como está no CATALOGO desta versão do sistema.
+// inserirLib()/addClausula() sufixam o id com "-2", "-3"… quando repetem uma
+// cláusula, por isso o fallback tira o sufixo antes de procurar.
+function clausulaPadrao(id){
+  const s=String(id||'');
+  return CATALOGO.find(x=>x.id===s) || CATALOGO.find(x=>x.id===s.replace(/-\d+$/,'')) || null;
+}
 function coletarDados(){
-  const dados={campos:{},credoras,devedores,alunos,itens,clausulas};
+  // `editado` grava, no momento de salvar, se o texto jurídico foi alterado à
+  // mão em relação ao padrão vigente AGORA. É o que permite, na restauração,
+  // distinguir "o usuário escreveu isso" de "é o texto antigo do sistema".
+  const clausulasMarcadas=clausulas.map(c=>{
+    const p=clausulaPadrao(c.id);
+    return {...c, editado: !p || c.titulo!==p.titulo || c.texto!==p.texto};
+  });
+  const dados={campos:{},credoras,devedores,alunos,itens,clausulas:clausulasMarcadas};
   // Usar allowlist: só campos conhecidos são persistidos (nunca credenciais)
   CAMPOS_FORMULARIO.forEach(id=>{
     const el=$(id); if(!el) return;
@@ -1868,7 +1882,24 @@ function coletarDados(){
 }
 function aplicarDados(d){
   credoras=d.credoras||[]; devedores=d.devedores||[]; alunos=d.alunos||[]; itens=d.itens||[];
-  if(d.clausulas&&d.clausulas.length) clausulas=d.clausulas.map((c,i)=>({id:c.id||('clausula-'+(i+1)),on:c.on!==false,titulo:c.titulo||'',texto:c.texto||''}));
+  const refrescadas=[];
+  if(d.clausulas&&d.clausulas.length) clausulas=d.clausulas.map((c,i)=>{
+    const r={id:c.id||('clausula-'+(i+1)),on:c.on!==false,titulo:c.titulo||'',texto:c.texto||''};
+    const p=clausulaPadrao(r.id);
+    // Um rascunho ou .json salvo antes de uma revisão jurídica carrega o texto
+    // ANTIGO das cláusulas. Restaurá-lo tal e qual reverte a revisão sem avisar
+    // ninguém (foi o caso da cláusula do título executivo, que voltava exigindo
+    // 2 testemunhas enquanto o fecho dizia "assinado eletronicamente").
+    // Texto editado à mão continua valendo; texto não editado cede ao padrão
+    // atual. Arquivos sem a marca `editado` (salvos antes desta correção) são
+    // tratados como não editados: perder uma redação própria e ser avisado é
+    // menos grave que assinar um texto revogado sem perceber.
+    if(p && c.editado!==true && (r.titulo!==p.titulo || r.texto!==p.texto)){
+      refrescadas.push(p.titulo||r.id);
+      return {...r, titulo:p.titulo, texto:p.texto};
+    }
+    return r;
+  });
   // Allowlist: só campos conhecidos são restaurados; chaves estranhas (ex: credenciais de versão antiga) são ignoradas
   Object.entries(d.campos||{}).forEach(([k,v])=>{
     if(!CAMPOS_FORMULARIO.has(k)) return;
@@ -1876,6 +1907,8 @@ function aplicarDados(d){
     if(el.type==='checkbox') el.checked=!!v; else el.value=v;
   });
   drawLists(); render();
+  if(refrescadas.length) toast('⚠ '+refrescadas.length+' cláusula(s) vinham de uma versão anterior e foram atualizadas para o texto vigente: '+refrescadas.join('; ')+'. Confira antes de exportar.');
+  return refrescadas;
 }
 
 // Seção 10 (Google Drive OAuth) removida: o fluxo OAuth do cliente foi substituído
