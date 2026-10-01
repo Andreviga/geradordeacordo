@@ -386,12 +386,41 @@ usuário pode ser criado depois pela interface.
 | 2026-08-04 | Fecho eletrônico (assinatura digital + dispensa de testemunhas, art. 784 §4º CPC) | ✅ Aprovado |
 | 2026-08-04 | Fecho físico (duas vias + duas testemunhas, art. 784 III CPC) | ✅ Aprovado |
 | 2026-08-04 | Texto de dispensa de testemunhas no modo eletrônico | ✅ Aprovado |
-| Pendente   | Cláusulas do corpo do acordo (multa moratória, multa penal, juros, cumulação) | ⚠ Não revisado |
-| Pendente   | Cláusula de foro de eleição | ⚠ Não revisado |
-| Pendente   | Qualificação das partes e cláusulas de confissão de dívida | ⚠ Não revisado |
+| 2026-10-01 | **As 17 cláusulas do catálogo**, texto integral — 12 do padrão e 5 da biblioteca | ✅ Aprovado |
+| 2026-10-01 | Cláusulas do corpo (multa moratória, multa penal, juros, cumulação) | ✅ Aprovado |
+| 2026-10-01 | Cláusula de foro de eleição | ✅ Aprovado |
+| 2026-10-01 | Cláusula de confissão de dívida (Primeira, incluindo a renúncia do §1º) | ✅ Aprovado |
+| Pendente   | Qualificação das partes (blocos CREDORA e DEVEDORES, gerados por `qualCredora()` e `qualDevedor()`) | ⚠ Não revisado |
 
-> As cláusulas "Não revisado" foram redigidas com base em modelos usuais e precisam de
-> validação por advogado antes de uso em situações de risco jurídico elevado.
+> A qualificação das partes **não** fazia parte do material submetido em 2026-10-01: a
+> revisão cobriu as cláusulas do catálogo, e os blocos de qualificação são montados em
+> código, fora dele. Continua pendente por isso, não por ressalva de conteúdo.
+
+### Revisão de 2026-10-01
+
+Revisão conduzida pelo responsável pelo sistema, advogado, sobre o texto integral das
+17 cláusulas conferido contra o código em produção (commit `49892e3`).
+
+Alterações aplicadas nessa rodada:
+
+- **Título executivo** — a cláusula passou a acompanhar o modo de assinatura. No
+  eletrônico invoca o art. 784, §4º do CPC e não menciona testemunhas; no físico mantém
+  as duas testemunhas e o inciso III. Antes afirmava as duas coisas no mesmo documento.
+- **Forma de pagamento, §3º** — deixou de pressupor boleto, já que o meio de pagamento
+  é campo livre.
+- **Manutenção da matrícula** — passou a citar também o art. 6º da Lei 9.870/1999, que
+  é onde está a vedação a penalidades pedagógicas; o art. 5º trata da renovação.
+
+Fundamento confirmado na revisão, para a dispensa de testemunhas no modo eletrônico:
+art. 784, §4º do CPC (Lei 14.620/2023), com assinatura pelo gov.br como assinatura
+eletrônica avançada da Lei 14.063/2020. O STJ, no REsp 2.205.708-PR (4ª Turma, Rel.
+Min. Isabel Gallotti, nov/2025), afastou a exigência de certificação ICP-Brasil.
+
+Sobre os limites de encargos: os 2% do art. 52, §1º do CDC alcançam a **multa de mora**.
+A multa penal é cláusula penal compensatória, limitada pelo art. 412 do Código Civil ao
+valor da obrigação principal. A cumulação das duas é admitida porque os fatos geradores
+são distintos — atraso de parcela e quebra do acordo. Por isso o campo da multa moratória
+não tem validação de teto: o limite varia conforme a natureza da relação.
 
 ---
 
@@ -488,14 +517,14 @@ automatizar, acrescente ao `vercel.json`:
 Sem `aplicar=1` o endpoint responde o ensaio e não altera nada — uma chamada
 acidental, ou um agendamento posto sem querer, não apaga nada.
 
-### Texto dos fechos — revisão jurídica obrigatória
+### Texto dos fechos
 
-> ⚠️ **Os três textos abaixo são rascunhos funcionais e precisam de revisão pela
-> assessoria jurídica do colégio antes de entrar em produção.**
+Os três textos abaixo foram aprovados em 2026-08-04 e o do modo eletrônico foi
+reconfirmado na revisão de 2026-10-01, junto com a cláusula do título executivo, que
+passou a acompanhar o mesmo fundamento.
 
-Ponto específico a confirmar com a assessoria: o gov.br entrega o relatório de
-conferência embutido no PDF assinado. Qualquer cláusula que trate esse relatório como
-peça separada precisa ser relida à luz disso.
+O gov.br entrega o relatório de conferência embutido no PDF assinado. Qualquer cláusula
+futura que trate esse relatório como peça separada precisa ser relida à luz disso.
 
 Texto atualmente em uso no modo eletrônico:
 > "...cuja integridade é conferida pela plataforma de assinatura digital utilizada,
@@ -521,6 +550,9 @@ Redação exata do §4º (Lei nº 14.620/2023):
 - Os textos das cláusulas usam tokens (`{{total}}`, `{{multaPenal}}`, `{{ref:mora}}`…) que se
   atualizam sozinhos quando você muda os campos ou a ordem das cláusulas.
 
-> ⚠️ **Revisão jurídica obrigatória.** Todo o texto gerado pelo app — cláusulas,
-> fecho e eleição de foro — deve ser revisado pela assessoria jurídica do colégio
-> antes de entrar em uso em produção.
+> **Revisão jurídica.** As cláusulas, os fechos e a eleição de foro foram revisados e
+> aprovados — ver a tabela em [Revisão jurídica](#revisão-jurídica), que registra a data
+> e o escopo de cada rodada. Segue pendente só a qualificação das partes.
+>
+> As cláusulas são editáveis na tela. Texto alterado ali sai do que foi aprovado, e
+> volta a depender de revisão.
