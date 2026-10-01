@@ -308,6 +308,14 @@ o passo a passo. Não há custo por assinatura e não há integração a manter.
 Cada signatário precisa de conta gov.br **Prata ou Ouro** — Bronze não habilita
 assinatura eletrônica avançada.
 
+**O PDF é enviado por quem opera, não gerado na hora.** Gere o termo em
+**Imprimir / PDF**, salve o arquivo e envie-o no campo da seção de assinatura. O
+SHA-256 das instruções é calculado sobre esse arquivo, que é o mesmo que vai ao
+`assinador.iti.gov.br` — por isso o hash fecha. Até 2026-10-01 o PDF era gerado no
+navegador pelo `html2canvas`, que rasterizava a página e chegou a sobrepor texto na
+qualificação; o hash impresso era o desse arquivo defeituoso e nunca batia com o que
+a secretaria realmente subia no portal. Coberto pelo teste `[D11]`.
+
 > ⚠️ **A assinatura é sequencial.** Cada signatário assina o arquivo **já assinado**
 > pelo anterior, nunca o original. Assinar o original em paralelo produz dois PDFs com
 > uma assinatura cada — sem validade como instrumento conjunto. As instruções que a

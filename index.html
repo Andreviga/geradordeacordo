@@ -6,9 +6,9 @@
 <title>Gerador de Termo de Confissão de Dívida — Colégio Raízes</title>
 <!-- accounts.google.com/gsi/client removido: a Seção 10 (Google Drive OAuth) saiu do app
      (ver comentário na linha ~920); o script era carregado sem uso em toda visita. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
-        integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg=="
-        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<!-- html2pdf.js removido em 2026-10-01: html2canvas rasterizava a página e
+     sobrepunha texto na qualificação (CNPJ da credora ilegível). O PDF agora sai
+     sempre de printPdf(), e o que vai ao gov.br é o arquivo enviado pelo usuário. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
         integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg=="
         crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -517,8 +517,16 @@ input[type=range]{width:100%;accent-color:var(--seal)}
           <button type="button" class="btn small" onclick="atualizarSignatarios()" style="margin-top:6px">↺ Atualizar da lista de devedores</button>
         </div>
       </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>PDF do termo — o arquivo que irá ao gov.br</label>
+          <p class="hint">Gere o documento em <b>Imprimir / PDF</b>, salve o arquivo e envie aqui <b>exatamente esse arquivo</b>. O SHA-256 das instruções é calculado sobre ele — é esse hash que cada signatário confere no portal, então ele precisa ser do mesmo PDF que subir no assinador.</p>
+          <input type="file" id="ass_pdf" accept="application/pdf,.pdf" onchange="aoEscolherPdfAssinatura()">
+          <div id="ass_pdf_info" class="hint" style="margin-top:6px"></div>
+        </div>
+      </div>
       <div class="row r2" style="margin-top:12px">
-        <div><button type="button" id="btnEnviarAssinatura" class="btn primary small" disabled style="width:100%" onclick="enviarAssinatura()">✉ Enviar para Assinatura Digital</button></div>
+        <div><button type="button" id="btnEnviarAssinatura" class="btn primary small" disabled style="width:100%" onclick="enviarAssinatura()">✉ Preparar assinatura no gov.br</button></div>
       </div>
       <div id="ass_result" style="display:none;margin-top:10px"></div>
     </div>
@@ -2061,17 +2069,36 @@ async function verificarAssinatura(){
     if(btn) btn.disabled=true;
   }
 }
-async function gerarPDFBase64(){
-  const blob=await html2pdf().set({
-    margin:0,html2canvas:{scale:2,useCORS:true,scrollY:0},
-    jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
-  }).from($('doc')).output('blob');
-  return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
-    reader.onload=()=>resolve(reader.result.split(',')[1]);
-    reader.onerror=reject;
-    reader.readAsDataURL(blob);
-  });
+// O PDF que vai ao gov.br é o arquivo que o usuário realmente vai assinar.
+// Antes ele era gerado aqui pelo html2canvas — o mesmo que sobrepunha texto na
+// qualificação —, e o SHA-256 impresso nas instruções era o desse arquivo
+// defeituoso, nunca o do PDF que a secretaria subia no assinador. A conferência
+// que a cláusula promete não fechava.
+let _pdfAssinatura = null;   // {nome, tamanho, base64, sha256}
+
+async function aoEscolherPdfAssinatura(){
+  const inp=$('ass_pdf'), info=$('ass_pdf_info');
+  _pdfAssinatura=null;
+  if(info) info.textContent='';
+  const f=inp&&inp.files&&inp.files[0];
+  if(!f) return;
+  try{
+    const buf=await f.arrayBuffer();
+    // %PDF- nos primeiros bytes: barra .docx, .jpg ou PDF truncado antes de subir
+    const cab=String.fromCharCode(...new Uint8Array(buf.slice(0,5)));
+    if(cab!=='%PDF-') throw new Error('o arquivo não é um PDF.');
+    const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',buf))]
+      .map(b=>b.toString(16).padStart(2,'0')).join('');
+    const u8=new Uint8Array(buf);
+    let bin='';
+    for(let i=0;i<u8.length;i+=0x8000) bin+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));
+    _pdfAssinatura={nome:f.name,tamanho:f.size,base64:btoa(bin),sha256:hash};
+    if(info) info.innerHTML='✓ <b>'+esc(f.name)+'</b> — '+Math.round(f.size/1024)+' KB · SHA-256 '
+      +'<code style="font-size:10px;word-break:break-all">'+esc(hash)+'</code>';
+  }catch(e){
+    if(info) info.innerHTML='<span style="color:var(--alert)">⚠ '+esc(e.message)+'</span>';
+    if(inp) inp.value='';
+  }
 }
 async function enviarAssinatura(){
   const{ok}=podeExportar(); if(!ok) return;
@@ -2093,12 +2120,16 @@ async function enviarAssinatura(){
     if(email.trim()) signatarios.push({nome,email:email.trim(),telefone:tel,papel,cpf});
   });
   if(!signatarios.length) return toast('Informe ao menos um e-mail de signatário.');
+  if(!_pdfAssinatura){
+    const st0=$('ass_status');
+    if(st0){ st0.innerHTML='Falta o PDF do termo. Gere o documento em <b>Imprimir / PDF</b>, salve o arquivo e envie-o no campo acima — o SHA-256 precisa ser o desse arquivo.'; st0.className='status aviso'; }
+    return toast('Envie o PDF do termo antes de preparar a assinatura.');
+  }
   const st=$('ass_status'),res=$('ass_result'),btn=$('btnEnviarAssinatura');
-  st.innerHTML='Gerando PDF e enviando…'; st.className='status aviso';
+  st.innerHTML='Conferindo o arquivo e preparando as instruções…'; st.className='status aviso';
   res.style.display='none'; btn.disabled=true;
   try{
-    toast('Gerando PDF…');
-    const pdfBase64=await gerarPDFBase64();
+    const pdfBase64=_pdfAssinatura.base64;
     const r=await fetch('/api/assinatura',{method:'POST',headers:apiHeaders(),
       body:JSON.stringify({action:'enviar',pdfBase64,signatarios,
         nomeDocumento:val('f_titulo')||'Termo de Confissão de Dívida',

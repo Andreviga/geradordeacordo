@@ -35,6 +35,8 @@ const EXCLUIDOS = new Set([
   'resetEmail',   // campo do painel "Esqueci minha senha" (não faz parte do formulário)
   'novaSenha1',   // campo nova senha do reset (não faz parte do formulário)
   'novaSenha2',   // campo confirmar senha do reset (não faz parte do formulário)
+  'ass_pdf',      // input[type=file] do PDF que vai ao gov.br — arquivo do disco,
+                  // nunca persistido no rascunho nem no .json (o navegador não restaura seleção de arquivo)
 ]);
 
 const campos = extrairCamposFormulario();
