@@ -904,7 +904,7 @@ const CATALOGO = [
 `O presente instrumento não constitui novação da dívida original, nos termos do art. 361 do Código Civil, servindo apenas como forma de composição amigável e de facilitação do pagamento, permanecendo íntegras as obrigações e garantias anteriormente constituídas.`},
 
 {id:'titulo', titulo:'DO TÍTULO EXECUTIVO EXTRAJUDICIAL', texto:
-`As partes reconhecem que o presente termo, assinado pelos {{DEV}} e por 2 (duas) testemunhas, constitui título executivo extrajudicial, nos termos do art. 784, inciso III, do Código de Processo Civil, autorizando a execução direta do saldo devedor em caso de inadimplemento.`},
+`As partes reconhecem que o presente termo, {{assinaturaTitulo}}, constitui título executivo extrajudicial, nos termos do {{fundamentoTitulo}}, do Código de Processo Civil, autorizando a execução direta do saldo devedor em caso de inadimplemento.`},
 
 {id:'antecipacao', titulo:'DA ANTECIPAÇÃO DE PARCELAS', texto:
 `É facultado aos {{DEV}} antecipar o pagamento de uma ou mais parcelas, ou liquidar antecipadamente o saldo devedor, com redução proporcional dos juros e demais acréscimos incidentes sobre o período antecipado, nos termos do art. 52, § 2º, do Código de Defesa do Consumidor.`},
@@ -1210,6 +1210,17 @@ function tokens(){
     multaPenal: num('e_multapenal').toString().replace('.',',')+'%', multaPenalExt: pct(num('e_multapenal')),
     honorarios: num('e_honorarios').toString().replace('.',',')+'%', honorariosExt: pct(num('e_honorarios')),
     indice: val('e_indice'), tolerancia: String(Math.floor(num('e_tolerancia'))),
+    // Base legal do título executivo — acompanha o modo de assinatura, como já
+    // fazia o fecho. Antes a cláusula afirmava "assinado ... por 2 (duas)
+    // testemunhas ... art. 784, inciso III" mesmo no modo eletrônico, enquanto o
+    // fecho do mesmo documento invocava o §4º e dispensava as testemunhas: o
+    // instrumento afirmava as duas coisas ao mesmo tempo.
+    // subst() é de passe único, então a palavra do devedor já vem resolvida aqui
+    // — {{DEV}} dentro do valor de um token não seria substituído.
+    assinaturaTitulo: chk('op_assinatura_eletronica')
+      ? `assinado eletronicamente ${md?'pelos DEVEDORES':'pelo(a) DEVEDOR(A)'}, com integridade conferida por provedor de assinatura`
+      : `assinado ${md?'pelos DEVEDORES':'pelo(a) DEVEDOR(A)'} e por 2 (duas) testemunhas`,
+    fundamentoTitulo: chk('op_assinatura_eletronica') ? 'art. 784, §4º' : 'art. 784, inciso III',
     foro: val('f_foro'), local: val('f_local'), __refs: mapaRefs()
   };
 }
@@ -1887,7 +1898,7 @@ function loadExample(){
 }
 $('lib').innerHTML = CATALOGO.map(c=>`<option value="${c.id}">${c.titulo}</option>`).join('');
 $('tokenList').innerHTML = 'Tokens (clique para copiar): '
-  + ['{{total}}','{{totalExt}}','{{valorTotalExtenso}}','{{valorOriginalExtenso}}','{{entradaExtenso}}','{{valorParcelaExtenso}}','{{nParcelas}}','{{nParcelasExt}}','{{valorParcela}}','{{valorUltima}}','{{data1Ext}}','{{ultimoVencExt}}','{{meio}}','{{multaMora}}','{{juros}}','{{multaPenal}}','{{multaPenalExt}}','{{honorarios}}','{{indice}}','{{foro}}','{{DEV}}','{{CRED}}','{{daCred}}','{{pelaCred}}','{{origem}}','{{listaParcelas}}','{{tabelaParcelas}}','{{demonstrativo}}','{{divisaoCredito}}','{{ref:reconhecimento}}']
+  + ['{{total}}','{{totalExt}}','{{valorTotalExtenso}}','{{valorOriginalExtenso}}','{{entradaExtenso}}','{{valorParcelaExtenso}}','{{nParcelas}}','{{nParcelasExt}}','{{valorParcela}}','{{valorUltima}}','{{data1Ext}}','{{ultimoVencExt}}','{{meio}}','{{multaMora}}','{{juros}}','{{multaPenal}}','{{multaPenalExt}}','{{honorarios}}','{{indice}}','{{assinaturaTitulo}}','{{fundamentoTitulo}}','{{foro}}','{{DEV}}','{{CRED}}','{{daCred}}','{{pelaCred}}','{{origem}}','{{listaParcelas}}','{{tabelaParcelas}}','{{demonstrativo}}','{{divisaoCredito}}','{{ref:reconhecimento}}']
     .map(t=>`<code onclick="navigator.clipboard&&navigator.clipboard.writeText('${t}');toast('${t} copiado')">${t}</code>`).join(' ');
 /* ================= PDF (html2pdf.js) ================= */
 async function baixarPdf(){

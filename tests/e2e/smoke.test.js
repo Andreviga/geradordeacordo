@@ -571,6 +571,43 @@ test.describe('P2 — verificações empíricas', () => {
     expect(docText).toContain('784');
   });
 
+  // ── [D7] Cláusula do título executivo acompanha o modo de assinatura ─────
+  test('[D7] A cláusula do título executivo não contradiz o fecho', async ({ page }) => {
+    // O documento chegou a afirmar as duas coisas ao mesmo tempo: o fecho
+    // dispensava testemunhas pelo art. 784, §4º, e a cláusula do título
+    // executivo declarava o termo "assinado por 2 (duas) testemunhas" pelo
+    // inciso III. Numa execução, é contradição que a defesa usa para atacar a
+    // certeza do título. Lei 14.620/2023 e REsp 2.205.708-PR amparam o §4º.
+    await autenticarP2(page);
+
+    const trecho = async () => {
+      await page.waitForTimeout(300);
+      const t = await page.locator('#doc').textContent();
+      const i = t.indexOf('TÍTULO EXECUTIVO EXTRAJUDICIAL');
+      expect(i, 'cláusula do título executivo precisa estar no documento').toBeGreaterThan(-1);
+      return t.slice(i + 30, i + 400).replace(/\s+/g, ' ');
+    };
+
+    // Eletrônico: dispensa testemunhas, fundamenta no §4º
+    await page.check('#op_assinatura_eletronica');
+    const eletronico = await trecho();
+    expect(eletronico, 'eletrônico não pode citar testemunhas').not.toMatch(/testemunha/i);
+    expect(eletronico, 'eletrônico não pode invocar o inciso III').not.toMatch(/inciso III/i);
+    expect(eletronico).toMatch(/assinado eletronicamente/i);
+    expect(eletronico).toMatch(/§\s*4º/);
+    expect(eletronico, 'deve usar a redação legal de integridade').toMatch(/provedor de assinatura/i);
+
+    // Físico: duas testemunhas, fundamenta no inciso III
+    await page.uncheck('#op_assinatura_eletronica');
+    const fisico = await trecho();
+    expect(fisico).toMatch(/2 \(duas\) testemunhas/i);
+    expect(fisico).toMatch(/inciso III/i);
+    expect(fisico, 'físico não pode invocar o §4º').not.toMatch(/§\s*4º/);
+
+    // Nenhum dos dois pode sobrar token cru
+    for (const t of [eletronico, fisico]) expect(t).not.toMatch(/\{\{/);
+  });
+
   // ── [D4] DOCX gerado: estrutura XML válida e conteúdo sem tokens brutos ───
   test('[D4] DOCX tem estrutura Office Open XML válida e conteúdo correto', async ({ page }) => {
     await autenticarP2(page);
