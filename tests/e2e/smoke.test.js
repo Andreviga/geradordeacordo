@@ -608,6 +608,48 @@ test.describe('P2 — verificações empíricas', () => {
     for (const t of [eletronico, fisico]) expect(t).not.toMatch(/\{\{/);
   });
 
+  // ── [D8] Campos entre colchetes bloqueiam a exportação ───────────────────
+  test('[D8] Placeholder entre colchetes não passa para o documento assinado', async ({ page }) => {
+    // A cláusula de garantia traz [Nome do garantidor], [000.000.000-00] e
+    // [endereço] para preencher à mão. A validação só olhava {{chaves}}, então
+    // um documento com esses campos em branco era exportado e ia assinado assim.
+    await autenticarP2(page);
+
+    const estado = async () => page.evaluate(() => {
+      const v = validarExportacao();
+      return { erros: v.erros.map(e => e.msg), pode: !!podeExportar().ok };
+    });
+
+    // O documento de exemplo não pode acusar nada: falso positivo aqui seria pior
+    await page.evaluate(() => loadExample());
+    await page.waitForTimeout(400);
+    const limpo = await estado();
+    expect(limpo.erros, `exemplo não pode acusar colchete:\n${limpo.erros.join('\n')}`).toHaveLength(0);
+
+    // Com a cláusula de garantia, os três campos precisam barrar a exportação
+    await page.evaluate(() => { document.getElementById('lib').value = 'garantia'; inserirLib(); });
+    await page.waitForTimeout(400);
+    const comGarantia = await estado();
+    expect(comGarantia.pode, 'exportação deve ficar bloqueada').toBe(false);
+    for (const campo of ['[Nome do garantidor]', '[000.000.000-00]', '[endereço]'])
+      expect(comGarantia.erros.join(' '), `${campo} precisa ser acusado`).toContain(campo);
+
+    // Data da 1ª parcela em branco vira "[data]" no documento: erro próprio,
+    // apontando a seção e o campo certos em vez da mensagem genérica
+    await page.evaluate(() => {
+      clausulas = clausulas.filter(c => c.id !== 'garantia');
+      const d = document.getElementById('p_data1');
+      d.value = ''; d.dispatchEvent(new Event('input', { bubbles: true }));
+      _planoAtual = null; drawLists(); render();
+    });
+    await page.waitForTimeout(400);
+    const semData = await page.evaluate(() => validarExportacao().erros.map(e => ({ msg: e.msg, secao: e.secao, campo: e.campo })));
+    const erroData = semData.find(e => e.msg.includes('[data]'));
+    expect(erroData, 'falta da data da 1ª parcela deve ser acusada').toBeTruthy();
+    expect(erroData.secao).toBe('05');
+    expect(erroData.campo).toBe('p_data1');
+  });
+
   // ── [D4] DOCX gerado: estrutura XML válida e conteúdo sem tokens brutos ───
   test('[D4] DOCX tem estrutura Office Open XML válida e conteúdo correto', async ({ page }) => {
     await autenticarP2(page);
