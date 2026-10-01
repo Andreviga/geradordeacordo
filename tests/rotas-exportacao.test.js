@@ -37,7 +37,8 @@ function extrairCorpo(nome) {
 const ROTAS_DOCUMENTO = [
   'exportWord',
   'printPdf',
-  'baixarPdf',
+  // baixarPdf removida em 2026-10-01: html2canvas sobrepunha texto na
+  // qualificação e perdia o timbre das páginas 2+. Só printPdf gera documento.
   'enviarAssinatura',   // substitui enviarAdobeSign como rota principal
 ];
 

@@ -84,6 +84,7 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 .status.erro{background:#fbeeea;border-color:var(--alert);color:#7d3520}
 .status.aviso{background:#fef9ec;border-color:#b8860b;color:#6b4c00}
 .status.expirado{background:#fff3e0;border-color:#e65100;color:#bf4500}
+#avisoClausulas[hidden]{display:none!important}
 
 /* ---------- documento ---------- */
 .page{background:#fff;position:relative;width:100%;max-width:794px;min-height:1123px;padding:0;box-shadow:0 2px 20px rgba(18,32,58,.13);font-family:"Times New Roman",Times,Georgia,serif;font-size:11.5pt;line-height:1.5;color:#000;text-align:justify}
@@ -312,13 +313,19 @@ input[type=range]{width:100%;accent-color:var(--seal)}
   </div>
   <div class="topbar-export" style="display:flex;gap:6px;align-items:center">
     <button class="btn" onclick="exportWord()">Baixar Word</button>
-    <button class="btn" onclick="baixarPdf()">Baixar PDF</button>
     <button class="btn" onclick="printPdf()">Imprimir / PDF</button>
     <button class="btn" id="btnSalvarBanco" onclick="salvarNoBanco()" title="Salva o acordo no banco de dados">Salvar no banco</button>
   </div>
   <div style="font-size:11px;text-align:right;padding:2px 10px 0;color:#9fb0c9" id="bancoStatusBar">
     <span id="bancoStatus"></span>
     <button class="btn ghost small" id="btnVerAcordos" onclick="abrirListagem()" style="margin-left:6px;display:none">Ver acordos</button>
+  </div>
+  <!-- Aviso que NAO pode sumir nem ficar escondido: texto juridico trocado na
+       restauracao de um rascunho antigo. Fica dentro da barra fixa de proposito —
+       no topo do formulario ele nascia atras dela, invisivel. -->
+  <div class="status aviso" id="avisoClausulas" hidden style="margin:0 10px 8px;flex-basis:100%;display:flex;align-items:center;gap:8px">
+    <span id="avisoClausulasTexto" style="flex:1"></span>
+    <button type="button" class="btn small" onclick="fecharAvisoClausulas()">Entendi</button>
   </div>
 </header>
 <div class="mobile-tabs" id="mobileTabs" role="tablist" aria-label="Visualização do documento">
@@ -329,13 +336,6 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 
 <div class="shell">
 <form class="panel" id="form" oninput="render()" onchange="render()" onsubmit="return false">
-
-  <!-- Aviso que NAO pode sumir sozinho: texto juridico trocado na restauracao
-       de um rascunho antigo. Um toast de 2,8s nao serve para isso. -->
-  <div class="status aviso" id="avisoClausulas" hidden>
-    <span id="avisoClausulasTexto"></span>
-    <button type="button" class="btn small" style="margin-left:8px" onclick="fecharAvisoClausulas()">Entendi</button>
-  </div>
 
   <details class="group" open>
     <summary><span class="num">01</span> Credoras</summary>
@@ -519,7 +519,6 @@ input[type=range]{width:100%;accent-color:var(--seal)}
       </div>
       <div class="row r2" style="margin-top:12px">
         <div><button type="button" id="btnEnviarAssinatura" class="btn primary small" disabled style="width:100%" onclick="enviarAssinatura()">✉ Enviar para Assinatura Digital</button></div>
-        <div><button type="button" class="btn small" style="width:100%" onclick="baixarPdf()">⬇ Baixar PDF (assinatura manual)</button></div>
       </div>
       <div id="ass_result" style="display:none;margin-top:10px"></div>
     </div>
@@ -1483,6 +1482,13 @@ function classificarTokensNoHTML(html, validos){
     avisos.push(`Chave desbalanceada: ${abre} × “{{” vs ${fecha} × “}}” no documento — verifique as cláusulas.`);
   return{erros,avisos};
 }
+// Tokens que nascem vazios de propósito: o valor já traz a vírgula e o conector
+// (", mediante entrada de …", ", relativa a …", ", junto a …"), então a frase
+// fecha sozinha quando o campo fica em branco. Avisar sobre eles disparava em
+// quase todo acordo — sem entrada, sem período, sem dados de pagamento — e
+// ensinava o usuário a ignorar o painel inteiro, inclusive os avisos que importam.
+const OPCIONAIS_POR_DESENHO = new Set(['entradaFrase','periodo','dadosPagto','alunos']);
+
 function validarExportacao(){
   if(!_planoAtual) _planoAtual=plano();
   const p=_planoAtual;
@@ -1585,7 +1591,7 @@ function validarExportacao(){
 
   const textoAtivo=clausulas.filter(c=>c.on).map(c=>c.titulo+'\n'+c.texto).join('\n');
   Object.entries(T).forEach(([k,v])=>{
-    if(k==='__refs'||v!=='') return;
+    if(k==='__refs'||v!==''||OPCIONAIS_POR_DESENHO.has(k)) return;
     if(textoAtivo.includes('{{'+k+'}}'))
       avisos.push(a('{{'+k+'}} está vazio — verifique se a frase ficará natural sem ele.','08'));
   });
@@ -1852,10 +1858,13 @@ async function gerarDocxBlob(){
 }
 function printPdf(){
   const{ok}=podeExportar(); if(!ok) return;
-  // Safari não repete position:fixed em print; redirecionar para html2pdf (Chromium)
+  // Safari não repete position:fixed em print. O caminho antigo caía no
+  // html2canvas, que rasteriza a página e sobrepõe texto — chegou a tornar o
+  // CNPJ da credora ilegível. Melhor abrir o documento em aba própria e deixar
+  // o Ctrl+P do navegador gerar o PDF de verdade.
   if(/^((?!chrome|android).)*safari/i.test(navigator.userAgent)){
-    toast('Safari: gerando PDF para download (cabeçalho garantido em todas as páginas)…');
-    baixarPdf();
+    toast('Safari: abrindo o documento em nova aba — use Cmd+P e "Salvar como PDF".');
+    abrirNovaAba();
     return;
   }
   try{ window.print(); }catch(e){ abrirNovaAba(); }
@@ -1959,20 +1968,15 @@ $('lib').innerHTML = CATALOGO.map(c=>`<option value="${c.id}">${c.titulo}</optio
 $('tokenList').innerHTML = 'Tokens (clique para copiar): '
   + ['{{total}}','{{totalExt}}','{{valorTotalExtenso}}','{{valorOriginalExtenso}}','{{entradaExtenso}}','{{valorParcelaExtenso}}','{{nParcelas}}','{{nParcelasExt}}','{{valorParcela}}','{{valorUltima}}','{{data1Ext}}','{{ultimoVencExt}}','{{meio}}','{{multaMora}}','{{juros}}','{{multaPenal}}','{{multaPenalExt}}','{{honorarios}}','{{indice}}','{{assinaturaTitulo}}','{{fundamentoTitulo}}','{{foro}}','{{DEV}}','{{CRED}}','{{daCred}}','{{pelaCred}}','{{origem}}','{{listaParcelas}}','{{tabelaParcelas}}','{{demonstrativo}}','{{divisaoCredito}}','{{ref:reconhecimento}}']
     .map(t=>`<code onclick="navigator.clipboard&&navigator.clipboard.writeText('${t}');toast('${t} copiado')">${t}</code>`).join(' ');
-/* ================= PDF (html2pdf.js) ================= */
-async function baixarPdf(){
-  const{ok}=podeExportar(); if(!ok) return;
-  toast('Gerando PDF…');
-  try{
-    await html2pdf().set({
-      margin:0, filename:nomeArquivo('pdf'),
-      image:{type:'jpeg',quality:0.98},
-      html2canvas:{scale:2,useCORS:true,letterRendering:true,scrollY:0},
-      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
-    }).from($('doc')).save();
-    toast('PDF gerado! Dica: use Imprimir/PDF para cabeçalho em todas as páginas.');
-  }catch(e){ toast('Erro ao gerar PDF: '+e.message); }
-}
+/* ================= PDF =================
+   "Baixar PDF" (html2pdf/html2canvas) foi removido em 2026-10-01. A biblioteca
+   rasteriza a página: no acordo 2026/002 ela sobrepôs texto sobre texto na
+   qualificação — "59.946.400/0001-37, com sede n" desenhado por cima de
+   "59.946." —, perdeu o papel timbrado das páginas 2+, pôs a marca d'água na
+   frente do texto e devolveu 2,9 MB de imagem sem texto selecionável. Desligar
+   letterRendering, desligar a justificação e usar foreignObjectRendering não
+   resolvem (o último destrói o layout). printPdf() sai correto: 262 KB, texto
+   de verdade, timbre em todas as páginas. Só ele gera documento para assinar. */
 
 
 /* ================= Assinatura Digital ================= */
@@ -3166,7 +3170,6 @@ if(window.innerWidth<=900) switchTab(sessionStorage.getItem('activeTab')||'form'
 <!-- Barra de ações fixada no rodapé (mobile) -->
 <div class="mobile-bottom" id="mobileBottom">
   <button class="btn primary" onclick="printPdf()">Imprimir/PDF</button>
-  <button class="btn" onclick="baixarPdf()">Baixar PDF</button>
   <button class="btn" onclick="exportWord()">Word</button>
   <button class="btn ghost" onclick="saveJson()">Salvar</button>
 </div>

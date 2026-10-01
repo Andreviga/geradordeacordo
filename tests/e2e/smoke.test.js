@@ -265,14 +265,20 @@ test.describe('Responsividade mobile — 375×667', () => {
     await expect(page.locator('#docPreview')).toBeHidden();
   });
 
-  test('[7] Barra de ações inferior visível e com quatro botões', async ({ page }) => {
+  // "Baixar PDF" saiu da barra em 2026-10-01 (html2canvas sobrepunha texto);
+  // restaram os três botões essenciais, e o de PDF é o da impressão.
+  test('[7] Barra de ações inferior visível e com os três botões essenciais', async ({ page }) => {
     await autenticarMobile(page);
     await expect(page.locator('#mobileBottom')).toBeVisible();
-    // Verifica os quatro botões essenciais
+    await expect(page.locator('#mobileBottom button')).toHaveCount(3);
     await expect(page.locator('#mobileBottom button').nth(0)).toContainText('Imprimir');
-    await expect(page.locator('#mobileBottom button').nth(1)).toContainText('PDF');
-    await expect(page.locator('#mobileBottom button').nth(2)).toContainText('Word');
-    await expect(page.locator('#mobileBottom button').nth(3)).toContainText('Salvar');
+    await expect(page.locator('#mobileBottom button').nth(1)).toContainText('Word');
+    await expect(page.locator('#mobileBottom button').nth(2)).toContainText('Salvar');
+    // Nenhum caminho de exportação pode voltar a passar pelo html2canvas.
+    const comHtml2canvas = await page.evaluate(() =>
+      [...document.querySelectorAll('[onclick]')].map(e => e.getAttribute('onclick'))
+        .filter(o => /baixarPdf/.test(o)));
+    expect(comHtml2canvas, 'nenhum botão pode chamar baixarPdf()').toHaveLength(0);
   });
 
   test('[8] Exportação bloqueada via barra inferior com token órfão', async ({ page }) => {
@@ -884,10 +890,27 @@ test.describe('P2 — verificações empíricas', () => {
       // pelo "Rascunho restaurado." que vem logo depois, e o usuário não via
       // que o texto jurídico havia sido trocado.
       const banner = document.getElementById('avisoClausulas');
-      out.avisoVisivel = !!(banner && !banner.hidden);
       out.avisoTexto = banner ? banner.textContent : '';
+      // `hidden === false` NÃO prova que o usuário vê: na primeira tentativa o
+      // banner nascia no topo do formulário, atrás da barra fixa (banner em
+      // 57–137px, header em 0–144px), e elementFromPoint devolvia o HEADER.
+      // Aqui se verifica quem realmente está desenhado naquele ponto da tela.
+      // A barra é sticky: ela só cobre o que vem depois dela DEPOIS de rolar.
+      // Foi assim que apareceu em produção (shell.top=57, header 0–144) e é a
+      // situação normal de quem está preenchendo o formulário.
+      window.scrollTo(0, 300);
+      await esperar(150);
+      const noTopo = () => {
+        if (!banner || banner.hidden) return 'oculto';
+        const r = banner.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return 'sem área';
+        if (r.top < 0 || r.bottom > innerHeight) return 'fora da viewport';
+        const alvo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return (alvo && banner.contains(alvo)) ? 'visivel' : 'coberto por ' + (alvo ? alvo.tagName + '.' + alvo.className : 'nada');
+      };
+      out.avisoVisivel = noTopo();
       await esperar(3200);   // mais que a vida do toast
-      out.avisoAindaVisivel = !!(banner && !banner.hidden);
+      out.avisoAindaVisivel = noTopo();
       return out;
     });
 
@@ -898,9 +921,48 @@ test.describe('P2 — verificações empíricas', () => {
     expect(r.textoC, 'rascunho atual não deve ser alterado').toBe(r.padrao);
     expect(r.docEletronico, 'fecho eletrônico presente').toBe(true);
     expect(r.docComTestemunhas, 'documento eletrônico não pode exigir 2 testemunhas').toBe(false);
-    expect(r.avisoVisivel, 'o usuário precisa ser avisado da troca de texto').toBe(true);
+    expect(r.avisoVisivel, 'o aviso precisa estar desenhado na tela, não só com hidden=false').toBe('visivel');
     expect(r.avisoTexto).toContain('TÍTULO EXECUTIVO');
-    expect(r.avisoAindaVisivel, 'o aviso não pode desaparecer sozinho').toBe(true);
+    expect(r.avisoAindaVisivel, 'o aviso não pode desaparecer nem ser coberto depois').toBe('visivel');
+  });
+
+  // ── [D10] Avisos de token vazio só para tokens que não nascem vazios ──────
+  // entradaFrase/periodo/dadosPagto/alunos já trazem a vírgula e o conector no
+  // próprio valor, então a frase fecha sozinha quando o campo fica em branco.
+  // O acordo 2026/002 (R$ 15.000, 30 parcelas, sem entrada, sem período, sem
+  // dados de pagamento) disparava os três avisos de uma vez — e um painel que
+  // grita em todo acordo ensina a ignorar também os avisos que importam.
+  test('[D10] Token opcional em branco não vira aviso; token realmente vazio vira', async ({ page }) => {
+    await autenticarP2(page);
+
+    const r = await page.evaluate(() => {
+      loadExample();
+      const set = (id, v) => { const e = document.getElementById(id); if (e) { if (e.type === 'checkbox') e.checked = v; else e.value = v; } };
+      set('d_total', '15000.00'); set('d_original', '15000.00');
+      set('p_modo', 'qtd'); set('p_qtd', '30'); set('p_data1', '2026-10-20');
+      set('d_periodo', ''); set('p_dados', ''); set('p_entrada', '');
+      set('op_assinatura_eletronica', true);
+      render();
+      const semOpcionais = (validarExportacao().avisos || []).map(x => x.msg);
+
+      // Prova que a regra não desligou o aviso inteiro: um token fora da lista,
+      // vazio e citado numa cláusula ativa, continua avisando.
+      const c = clausulas.find(x => x.on);
+      const textoOriginal = c.texto;
+      c.texto = textoOriginal + ' {{ultimoVencExt}}';
+      set('p_data1', '');            // sem 1ª parcela, ultimoVencExt fica vazio
+      render();
+      const comTokenVazio = (validarExportacao().avisos || []).map(x => x.msg);
+      c.texto = textoOriginal; set('p_data1', '2026-10-20'); render();
+
+      return { semOpcionais, comTokenVazio };
+    });
+
+    const opcionais = r.semOpcionais.filter(m => /\{\{(entradaFrase|periodo|dadosPagto|alunos)\}\}/.test(m));
+    expect(opcionais, `tokens opcionais não podem virar aviso:\n${opcionais.join('\n')}`).toHaveLength(0);
+    expect(r.semOpcionais.some(m => /CEP ausente/.test(m)), 'os avisos reais continuam').toBe(true);
+    expect(r.comTokenVazio.some(m => /\{\{ultimoVencExt\}\} está vazio/.test(m)),
+      'token vazio fora da lista ainda precisa avisar').toBe(true);
   });
 
 });
