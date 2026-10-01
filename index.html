@@ -875,7 +875,7 @@ const CATALOGO = [
 {{listaParcelas}}
 **Parágrafo Primeiro —** O vencimento da primeira parcela ocorrerá em {{data1Ext}}, e os das demais no mesmo dia dos meses subsequentes. Os pagamentos serão realizados via {{meio}}{{dadosPagto}}, encerrando-se o parcelamento em {{ultimoVencExt}}.
 **Parágrafo Segundo —** Vencendo-se qualquer parcela em sábado, domingo ou feriado bancário, o pagamento poderá ser efetuado no primeiro dia útil subsequente, sem qualquer acréscimo.
-**Parágrafo Terceiro —** O não recebimento do boleto não exime os {{DEV}} da obrigação de pagar na data do vencimento, cabendo-lhes solicitar a segunda via {{aCred}} com antecedência mínima de 2 (dois) dias úteis.
+**Parágrafo Terceiro —** O não recebimento do boleto, da cobrança ou das instruções de pagamento não exime os {{DEV}} da obrigação de pagar na data do vencimento, cabendo-lhes solicitar a segunda via ou os dados necessários {{aCred}} com antecedência mínima de 2 (dois) dias úteis.
 **Parágrafo Quarto —** Somente o comprovante de pagamento, acompanhado da respectiva compensação bancária, comprova a quitação de cada parcela.
 **Parágrafo Quinto —** As parcelas vencem nas seguintes datas:
 {{tabelaParcelas}}`},
@@ -898,7 +898,7 @@ const CATALOGO = [
 `[Nome do garantidor], inscrito(a) no CPF sob o nº [000.000.000-00], residente e domiciliado(a) em [endereço], assina o presente instrumento na qualidade de **devedor(a) solidário(a) e principal pagador(a)**, respondendo integralmente pelas obrigações aqui assumidas, com renúncia expressa ao benefício de ordem.`},
 
 {id:'matricula', titulo:'DA MANUTENÇÃO DA MATRÍCULA', texto:
-`A regularidade no cumprimento deste acordo é condição para a renovação da matrícula dos ALUNOS BENEFICIÁRIOS, nos termos do art. 5º da Lei nº 9.870/1999, ficando vedada, durante a vigência regular do acordo, qualquer forma de constrangimento ao aluno ou de restrição às atividades pedagógicas e avaliativas.`},
+`A regularidade no cumprimento deste acordo é condição para a renovação da matrícula dos ALUNOS BENEFICIÁRIOS, nos termos do art. 5º da Lei nº 9.870/1999, ficando vedada, durante a vigência regular do acordo, qualquer forma de constrangimento ao aluno ou de restrição às atividades pedagógicas e avaliativas, na forma do art. 6º da mesma Lei.`},
 
 {id:'novacao', titulo:'DA AUSÊNCIA DE NOVAÇÃO', texto:
 `O presente instrumento não constitui novação da dívida original, nos termos do art. 361 do Código Civil, servindo apenas como forma de composição amigável e de facilitação do pagamento, permanecendo íntegras as obrigações e garantias anteriormente constituídas.`},
@@ -1548,6 +1548,19 @@ function validarExportacao(){
   }
 
   const html=wordHtml();
+
+  // Campos entre colchetes deixados em branco. A cláusula de garantia, da
+  // biblioteca, traz [Nome do garantidor], [000.000.000-00] e [endereço] para
+  // preencher à mão; e {{data1Ext}} vira [data] quando falta a data da 1ª
+  // parcela. A validação de tokens só olha {{chaves}}, então um documento com
+  // esses campos em branco passava e ia assinado assim.
+  const textoDoc = html.replace(/<[^>]*>/g,' ');
+  const colchetes = [...new Set(textoDoc.match(/\[[^\]\n]{2,40}\]/g) || [])];
+  colchetes.forEach(ph => erros.push(
+    ph === '[data]'
+      ? e('Falta a data da 1ª parcela: o documento sairia com "[data]" no lugar.','05','p_data1')
+      : e(`Campo não preenchido no documento: ${ph} — substitua pelo valor real antes de exportar.`,'07')));
+
   const T=tokens();
   const validos=new Set([
     ...Object.keys(T).filter(k=>k!=='__refs'),
