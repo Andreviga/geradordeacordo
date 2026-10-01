@@ -330,6 +330,13 @@ input[type=range]{width:100%;accent-color:var(--seal)}
 <div class="shell">
 <form class="panel" id="form" oninput="render()" onchange="render()" onsubmit="return false">
 
+  <!-- Aviso que NAO pode sumir sozinho: texto juridico trocado na restauracao
+       de um rascunho antigo. Um toast de 2,8s nao serve para isso. -->
+  <div class="status aviso" id="avisoClausulas" hidden>
+    <span id="avisoClausulasTexto"></span>
+    <button type="button" class="btn small" style="margin-left:8px" onclick="fecharAvisoClausulas()">Entendi</button>
+  </div>
+
   <details class="group" open>
     <summary><span class="num">01</span> Credoras</summary>
     <div class="body">
@@ -572,6 +579,12 @@ const extDate = d => d? d.getDate()+' de '+MESES[d.getMonth()]+' de '+d.getFullY
 function addMonths(d,m){ const dt=new Date(d.getFullYear(),d.getMonth(),1),day=d.getDate(); dt.setMonth(dt.getMonth()+m);
   const last=new Date(dt.getFullYear(),dt.getMonth()+1,0).getDate(); dt.setDate(Math.min(day,last)); return dt; }
 function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('on'),2800); }
+function avisoClausulas(titulos){
+  const box=$('avisoClausulas'), txt=$('avisoClausulasTexto'); if(!box||!txt) return;
+  txt.textContent='⚠ '+titulos.length+' cláusula(s) vinham de uma versão anterior do sistema e foram atualizadas para o texto vigente: '+titulos.join('; ')+'. Confira antes de exportar.';
+  box.hidden=false;
+}
+function fecharAvisoClausulas(){ const b=$('avisoClausulas'); if(b) b.hidden=true; }
 
 /* ================= feriados (P1.4) ================= */
 // Cálculo da Páscoa — algoritmo de Gauss/Meeus/Jones/Butcher
@@ -1907,7 +1920,7 @@ function aplicarDados(d){
     if(el.type==='checkbox') el.checked=!!v; else el.value=v;
   });
   drawLists(); render();
-  if(refrescadas.length) toast('⚠ '+refrescadas.length+' cláusula(s) vinham de uma versão anterior e foram atualizadas para o texto vigente: '+refrescadas.join('; ')+'. Confira antes de exportar.');
+  if(refrescadas.length) avisoClausulas(refrescadas); else fecharAvisoClausulas();
   return refrescadas;
 }
 
@@ -3027,11 +3040,13 @@ function pedirRestauracaoAutosave(){
     const restaurar=confirm('Encontramos um rascunho'+(dataStr?' salvo em '+dataStr:'')+'.\n\nOK = restaurar | Cancelar = descartar e abrir o exemplo padrão\n\nATENÇÃO: Em computadores compartilhados, sempre use “Limpar” ou “Sair” ao terminar.');
     if(restaurar){
       _restaurando=true;
-      aplicarDados(dados);
+      const refrescadas=aplicarDados(dados);
       _dadosUltimoSalvo=raw;
       _restaurando=false;
       const el=$('autosave_indicator'); if(el) el.textContent='Rascunho restaurado';
-      toast('Rascunho restaurado.');
+      // Se houve troca de texto jurídico, o banner é o aviso que importa — um
+      // toast de "Rascunho restaurado." só tiraria a atenção dele.
+      if(!(refrescadas&&refrescadas.length)) toast('Rascunho restaurado.');
       return true;
     }else{
       localStorage.removeItem('ger_autosave');
@@ -3053,6 +3068,7 @@ function limparDados(){
   if(!confirm('Limpar todos os dados preenchidos? Esta ação não pode ser desfeita.')) return;
   credoras=[]; devedores=[]; alunos=[]; itens=[];
   resetClausulas();
+  fecharAvisoClausulas();
   localStorage.removeItem('ger_autosave');
   _dadosUltimoSalvo=null;
   _gerarChaveIdempotencia(); // novo formulário = nova chave; impede reaproveitar idempotência anterior
