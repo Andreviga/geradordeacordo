@@ -1289,7 +1289,10 @@ function buildDoc(){
          : (devedores[0]?`<p>${qualDevedor(devedores[0])}</p>`:'');
   if(alunos.length){
     h+=`<p><span class="lbl">Alunos beneficiários:</span></p>`;
-    h+=alunos.map((a,i)=>`<p class="bul">${i+1}. <b>${esc(a.nome)}</b>, matriculado(a) no curso/série ${esc(a.serie)}${a.turno?', turno '+esc(a.turno):''}${a.ra?', matrícula nº '+esc(a.ra):''}.</p>`).join('');
+    // Só o nome do aluno. A série saiu do documento: ela é cadastral, muda a cada
+    // ano letivo e, quando o campo ficava vazio, o texto saía truncado — "matriculado(a)
+    // no curso/série ." Turno e matrícula seguem condicionais: só entram se preenchidos.
+    h+=alunos.map((a,i)=>`<p class="bul">${i+1}. <b>${esc(a.nome)}</b>${a.turno?', turno '+esc(a.turno):''}${a.ra?', matrícula nº '+esc(a.ra):''}.</p>`).join('');
   }
   h+=`<p>As partes acima qualificadas celebram o presente ${esc(val('f_titulo').toLowerCase())}, que se regerá pelas cláusulas e condições seguintes:</p>`;
 
