@@ -880,6 +880,14 @@ test.describe('P2 — verificações empíricas', () => {
       const doc = document.body.innerText;
       out.docComTestemunhas = /por 2 \(duas\) testemunhas/.test(doc);
       out.docEletronico = /assinado eletronicamente/.test(doc);
+      // O aviso tem que ser um banner que fica: um toast de 2,8s era apagado
+      // pelo "Rascunho restaurado." que vem logo depois, e o usuário não via
+      // que o texto jurídico havia sido trocado.
+      const banner = document.getElementById('avisoClausulas');
+      out.avisoVisivel = !!(banner && !banner.hidden);
+      out.avisoTexto = banner ? banner.textContent : '';
+      await esperar(3200);   // mais que a vida do toast
+      out.avisoAindaVisivel = !!(banner && !banner.hidden);
       return out;
     });
 
@@ -890,6 +898,9 @@ test.describe('P2 — verificações empíricas', () => {
     expect(r.textoC, 'rascunho atual não deve ser alterado').toBe(r.padrao);
     expect(r.docEletronico, 'fecho eletrônico presente').toBe(true);
     expect(r.docComTestemunhas, 'documento eletrônico não pode exigir 2 testemunhas').toBe(false);
+    expect(r.avisoVisivel, 'o usuário precisa ser avisado da troca de texto').toBe(true);
+    expect(r.avisoTexto).toContain('TÍTULO EXECUTIVO');
+    expect(r.avisoAindaVisivel, 'o aviso não pode desaparecer sozinho').toBe(true);
   });
 
 });
